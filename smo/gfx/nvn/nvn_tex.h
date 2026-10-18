@@ -65,5 +65,13 @@ size_t nvn_tex_detile(void *dst, size_t dst_cap, uint32_t dst_stride,
                       const void *src, size_t src_size,
                       uint32_t width_blks, uint32_t height_blks,
                       uint32_t bytes_per_block, uint8_t tile_h_log2);
+// 3D 块线性第 (x,y,z) 个块在这一 mip 内的字节偏移（tile = 1 GOB 宽 × 2^h GOB 高 × 2^d 片深）。
+uint64_t nvn_tex_block_offset3d(uint32_t x_blk, uint32_t y_blk, uint32_t z,
+                                uint32_t width_blks, uint32_t height_blks, uint32_t bytes_per_block,
+                                uint8_t tile_h_log2, uint8_t tile_d_log2);
+// 把一个 3D mip 解交错成 z → y → x 紧密排列；返回写出字节数，0 = 失败。
+size_t nvn_tex_detile3d(void *dst, size_t dst_cap, const void *src, size_t src_size,
+                        uint32_t width_blks, uint32_t height_blks, uint32_t depth,
+                        uint32_t bytes_per_block, uint8_t tile_h_log2, uint8_t tile_d_log2);
 
 #endif

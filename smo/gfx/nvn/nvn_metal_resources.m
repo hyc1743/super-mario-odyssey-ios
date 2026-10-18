@@ -79,7 +79,10 @@ static int texture_type(uint32_t target,MTLTextureType *out) {
     case 6:*out=MTLTextureType2DMultisampleArray;return 1;
     case 8:*out=MTLTextureTypeCube;return 1;
     case 9:*out=MTLTextureTypeCubeArray;return 1;
-    default:return 0; /* 3D/rectangle/buffer require different proven layouts. */
+    /* 真机 v0.6.18：Start 后 ×575 NVN_METAL_RESOURCE_UNSUPPORTED target=2（R8 与 RG11B10 的 3D 贴图，
+     * 体积雾/调色表）→ 渲染目标解析失败 → 整遍跳过 → 黑屏。布局按 deko3d 的 3D 块线性规则。 */
+    case 2:*out=MTLTextureType3D;return 1;
+    default:return 0; /* rectangle/buffer require different proven layouts. */
     }
 }
 static NSData *resource_key(id<MTLDevice> device,const nvn_resource_snapshot *s) {
@@ -101,33 +104,57 @@ static int layout(const uint64_t *w,nvn_tex_layout *l,uint64_t *layer_stride,uin
     case 4:case 6:l->layers=(uint32_t)w[3];break;
     case 8:l->layers=6;break;
     case 9:l->layers=(uint32_t)w[3]*6;break;
+    case 2:l->dims=3;l->depth=(uint32_t)w[3];break;
     default:return 0;
     }
     if(w[8]>1) { if(w[8]==2)l->samples_x=2;else if(w[8]==4)l->samples_x=l->samples_y=2;
         else if(w[8]==8){l->samples_x=4;l->samples_y=2;}else return 0; }
     l->linear=!!(w[6]&0x10);l->stride=(uint32_t)w[11];
     if(l->linear) {
-        if(l->mip_levels!=1||w[8]>1)return 0;
+        if(l->mip_levels!=1||w[8]>1||l->dims==3)return 0;
         if(!l->stride) {uint32_t a=w[6]&0x40?128:32;l->stride=(tex_div_ceil(l->width,f.bw)*f.bpb+a-1)&~(a-1);}
         if(l->stride<tex_div_ceil(l->width,f.bw)*f.bpb)return 0;
         *layer_stride=(uint64_t)l->stride*tex_div_ceil(l->height,f.bh);
     } else {
-        if(l->dims==2)l->tile_h_log2=nvn_tex_default_tile_h(l->height,l->samples_y,f.bh);
+        if(l->dims>=2)l->tile_h_log2=nvn_tex_default_tile_h(l->height,l->samples_y,f.bh);
+        if(l->dims==3)l->tile_d_log2=tex_pick_tile_size(l->depth+l->depth/2);
         if(!nvn_tex_package_tile_h(w,&l->tile_h_log2))return 0;
         *layer_stride=nvn_tex_level_offset(l,l->mip_levels);
         if(l->layers>1)*layer_stride=tex_align_layer_size(*layer_stride,l->height,1,f.bh,l->tile_h_log2,0);
     }
     uint32_t largest=l->width>l->height?l->width:l->height;
+    if(l->dims==3&&l->depth>largest)largest=l->depth;
     unsigned max_levels=1;while(largest>1){largest>>=1;max_levels++;}
     if(l->mip_levels>max_levels)return 0;
     if((w[7]==8||w[7]==9)&&l->width!=l->height)return 0;
     if((w[7]==5||w[7]==6)&&(w[8]<=1||l->mip_levels!=1))return 0;
     if(w[7]!=5&&w[7]!=6&&w[8]>1)return 0;
+    if(l->dims==3&&(w[8]>1||l->depth>2048))return 0;
     *storage=*layer_stride*l->layers;
     return *storage!=0;
 }
+static int upload3d(id<MTLTexture> tex,const uint64_t *w,pixel_info p,const nvn_tex_layout *l,
+                    const uint8_t *source,uint64_t storage) {
+    if(p.compressed)return 0;
+    for(uint32_t level=0;level<l->mip_levels;level++){
+        uint32_t width=tex_mip_size(l->width,level),height=tex_mip_size(l->height,level),depth=tex_mip_size(l->depth,level);
+        uint64_t row=(uint64_t)width*p.bytes,image=row*height,size=image*depth;
+        uint64_t offset=nvn_tex_level_offset(l,level);
+        if(offset>=storage||size>SIZE_MAX)return 0;
+        uint8_t *decoded=malloc((size_t)size);if(!decoded)return 0;
+        if(!nvn_tex_detile3d(decoded,(size_t)size,source+offset,(size_t)(storage-offset),width,height,depth,
+                p.bytes,tex_adjust_tile_size(l->tile_h_log2,8,height),tex_adjust_tile_size(l->tile_d_log2,1,depth))){
+            free(decoded);return 0;
+        }
+        [tex replaceRegion:MTLRegionMake3D(0,0,0,width,height,depth) mipmapLevel:level slice:0
+            withBytes:decoded bytesPerRow:(NSUInteger)row bytesPerImage:(NSUInteger)image];
+        free(decoded);
+    }
+    (void)w;return 1;
+}
 static int upload(id<MTLTexture> tex,const uint64_t *w,pixel_info p,const nvn_tex_layout *l,
                   const uint8_t *source,uint64_t layer_stride,uint64_t storage) {
+    if(l->dims==3)return upload3d(tex,w,p,l,source,storage);
     for(uint32_t layer=0;layer<l->layers;layer++)for(uint32_t level=0;level<l->mip_levels;level++) {
         nvn_tex_layout mip=*l;mip.width=tex_mip_size(l->width,level);mip.height=tex_mip_size(l->height,level);
         mip.layers=1;mip.mip_levels=1;
@@ -166,6 +193,16 @@ static id<MTLTexture> texture_view(SMONVNMetalTexture *entry,const nvn_view_stat
     }
     MTLTextureType type=base.textureType;
     if((v.flags&NVN_VIEW_TARGET)&&!texture_type((uint32_t)v.target,&type))return nil;
+    /* Metal asserts (abort, not nil) on invalid view shapes. 真机 v0.6.18 闪退：
+     * `newSliceRange.length(1) must be a multiple of (6)` —— 游戏取立方体贴图的单个面当 2D 用，
+     * 视图却仍按 Cube 类型请求。目标未指定时按层数推出等价的 2D / 2DArray。 */
+    if(!(v.flags&NVN_VIEW_TARGET)&&(type==MTLTextureTypeCube||type==MTLTextureTypeCubeArray)&&layers%6)
+        type=layers==1?MTLTextureType2D:MTLTextureType2DArray;
+    if((type==MTLTextureTypeCube||type==MTLTextureTypeCubeArray)&&(layers%6||(type==MTLTextureTypeCube&&layers!=6)))return nil;
+    if((type==MTLTextureType2D||type==MTLTextureType1D||type==MTLTextureType2DMultisample||type==MTLTextureType3D)&&layers!=1)return nil;
+    if((type==MTLTextureType3D)!=(base.textureType==MTLTextureType3D))return nil;
+    if((base.textureType==MTLTextureType2DMultisample||base.textureType==MTLTextureType2DMultisampleArray)!=
+       (type==MTLTextureType2DMultisample||type==MTLTextureType2DMultisampleArray))return nil;
     MTLTextureSwizzleChannels sw=MTLTextureSwizzleChannelsMake(MTLTextureSwizzleRed,MTLTextureSwizzleGreen,MTLTextureSwizzleBlue,MTLTextureSwizzleAlpha);
     if(v.flags&NVN_VIEW_SWIZZLE){
         static const MTLTextureSwizzle map[]={MTLTextureSwizzleZero,MTLTextureSwizzleOne,MTLTextureSwizzleRed,MTLTextureSwizzleGreen,MTLTextureSwizzleBlue,MTLTextureSwizzleAlpha};
@@ -209,7 +246,7 @@ id<MTLTexture> nvn_metal_texture(id<MTLDevice> device,const nvn_resource_snapsho
             goto failure;
         }
         MTLTextureDescriptor *d=[MTLTextureDescriptor new];d.textureType=type;d.pixelFormat=p.metal;
-        d.width=l.width;d.height=l.height;d.depth=1;d.mipmapLevelCount=l.mip_levels;
+        d.width=l.width;d.height=l.height;d.depth=l.dims==3?l.depth:1;d.mipmapLevelCount=l.mip_levels;
         d.arrayLength=(type==MTLTextureTypeCubeArray)?l.layers/6:(type==MTLTextureTypeCube?1:l.layers);
         d.sampleCount=w[8]>1?(NSUInteger)w[8]:1;
         d.storageMode=(p.depth||w[8]>1)?MTLStorageModePrivate:MTLStorageModeShared;

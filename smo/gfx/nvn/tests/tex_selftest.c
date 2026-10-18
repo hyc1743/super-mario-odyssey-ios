@@ -225,7 +225,59 @@ static void test_real_shapes(void) {
     CHECK(all_ok, "全部 >= 裸数据量且按 GOB 对齐");
 }
 
+// ---------------------------------------------------------------- ④ 3D 块线性
+// 判据：(x,y,z) → 偏移在整张 3D mip 的 tile 对齐存储内是单射（不碰撞、不越界），
+// 且解交错与按公式写入互逆。存储大小取 nvn_tex_level_offset 的 3D 结果（deko3d 口径）。
+static void test_3d(void) {
+    printf("== 7. 3D 块线性：单射 + 解交错可逆 ==\n");
+    static const struct { uint32_t w, h, d, bpb; } shapes[] = {
+        {32, 32, 32, 1}, {64, 32, 16, 4}, {17, 9, 5, 1}, {128, 8, 3, 4},
+    };
+    for (unsigned i = 0; i < sizeof shapes / sizeof shapes[0]; i++) {
+        nvn_tex_layout L = {0};
+        L.width = shapes[i].w; L.height = shapes[i].h; L.depth = shapes[i].d;
+        L.layers = 1; L.mip_levels = 1; L.bytes_per_block = shapes[i].bpb;
+        L.block_w = L.block_h = 1; L.samples_x = L.samples_y = 1; L.dims = 3;
+        L.tile_h_log2 = nvn_tex_default_tile_h(L.height, 1, 1);
+        L.tile_d_log2 = tex_pick_tile_size(L.depth + L.depth / 2);
+        uint8_t h = tex_adjust_tile_size(L.tile_h_log2, 8, L.height);
+        uint8_t d = tex_adjust_tile_size(L.tile_d_log2, 1, L.depth);
+        uint64_t storage = nvn_tex_level_offset(&L, 1);
+        static uint8_t src[1 << 20], dst[1 << 20], seen[1 << 20];
+        CHECK(storage <= sizeof src, "形状 %ux%ux%u×%u：存储 %llu 字节", L.width, L.height, L.depth,
+              L.bytes_per_block, (unsigned long long)storage);
+        memset(seen, 0, sizeof seen);
+        int oob = 0, dup = 0;
+        for (uint32_t z = 0; z < L.depth; z++)
+            for (uint32_t y = 0; y < L.height; y++)
+                for (uint32_t x = 0; x < L.width; x++) {
+                    uint64_t o = nvn_tex_block_offset3d(x, y, z, L.width, L.height, L.bytes_per_block, h, d);
+                    if (o + L.bytes_per_block > storage) { oob++; continue; }
+                    if (seen[o]++) dup++;
+                    for (uint32_t b = 0; b < L.bytes_per_block; b++)
+                        src[o + b] = (uint8_t)(x * 7 + y * 13 + z * 29 + b);
+                }
+        CHECK(oob == 0 && dup == 0, "  偏移不越界（%d）、不碰撞（%d）", oob, dup);
+        size_t got = nvn_tex_detile3d(dst, sizeof dst, src, (size_t)storage, L.width, L.height, L.depth,
+                                      L.bytes_per_block, h, d);
+        int bad = 0;
+        uint64_t row = (uint64_t)L.width * L.bytes_per_block, image = row * L.height;
+        for (uint32_t z = 0; z < L.depth; z++)
+            for (uint32_t y = 0; y < L.height; y++)
+                for (uint32_t x = 0; x < L.width; x++)
+                    for (uint32_t b = 0; b < L.bytes_per_block; b++)
+                        if (dst[z * image + y * row + x * L.bytes_per_block + b] != (uint8_t)(x * 7 + y * 13 + z * 29 + b)) bad++;
+        CHECK(got == image * L.depth && bad == 0, "  解交错还原（错 %d 字节）", bad);
+        /* 只截掉 tile 尾部的填充不影响；截到最后一个真正用到的字节以内必须整体失败 */
+        uint64_t used = 0;
+        for (uint64_t o = 0; o < storage; o++) if (seen[o]) used = o + L.bytes_per_block;
+        CHECK(!nvn_tex_detile3d(dst, sizeof dst, src, (size_t)used - 1, L.width, L.height, L.depth,
+                                L.bytes_per_block, h, d), "  源截到最后一个用到的字节以内 → 整体失败");
+    }
+}
+
 int main(void) {
+    test_3d();
     test_gob_bijection();
     test_block_offset_matches_ref();
     test_detile_roundtrip();

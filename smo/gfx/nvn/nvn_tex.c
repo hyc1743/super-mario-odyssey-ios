@@ -176,6 +176,41 @@ uint64_t nvn_tex_block_offset(uint32_t x_blk, uint32_t y_blk,
     return gob + nvn_tex_gob_offset(x_bytes, y_blk);
 }
 
+// 3D：一个 tile 是 1 GOB 宽 × 2^h GOB 高 × 2^d 片深，tile 内先按片（z）排 2^h 个 GOB 一组，
+// tile 之间按 x → y → z 排。与 nvn_texture_transfer.c 的 byte_offset 同一公式（deko3d / Ryujinx BlockLinearLayout）。
+uint64_t nvn_tex_block_offset3d(uint32_t x_blk, uint32_t y_blk, uint32_t z,
+                                uint32_t width_blks, uint32_t height_blks, uint32_t bytes_per_block,
+                                uint8_t tile_h_log2, uint8_t tile_d_log2) {
+    uint32_t x_bytes = x_blk * bytes_per_block;
+    uint32_t width_gobs = tex_div_ceil(width_blks * bytes_per_block, 64);
+    uint32_t tile_rows = tex_div_ceil(height_blks, 8U << tile_h_log2);
+    uint64_t tile = UINT64_C(512) << (tile_h_log2 + tile_d_log2);
+    return ((uint64_t)(z >> tile_d_log2) * tile_rows + y_blk / (8U << tile_h_log2)) * width_gobs * tile
+         + (uint64_t)(x_bytes / 64) * tile
+         + ((uint64_t)(z & ((1U << tile_d_log2) - 1)) << (9 + tile_h_log2))
+         + (uint64_t)((y_blk % (8U << tile_h_log2)) / 8) * 512
+         + nvn_tex_gob_offset(x_bytes, y_blk);
+}
+
+size_t nvn_tex_detile3d(void *dst, size_t dst_cap, const void *src, size_t src_size,
+                        uint32_t width_blks, uint32_t height_blks, uint32_t depth,
+                        uint32_t bytes_per_block, uint8_t tile_h_log2, uint8_t tile_d_log2) {
+    if (!dst || !src || !width_blks || !height_blks || !depth || !bytes_per_block) return 0;
+    uint64_t row = (uint64_t)width_blks * bytes_per_block, image = row * height_blks;
+    if (image * depth > dst_cap) return 0;
+    uint8_t *d = (uint8_t *)dst;
+    const uint8_t *s = (const uint8_t *)src;
+    for (uint32_t z = 0; z < depth; z++)
+        for (uint32_t y = 0; y < height_blks; y++)
+            for (uint32_t x = 0; x < width_blks; x++) {
+                uint64_t off = nvn_tex_block_offset3d(x, y, z, width_blks, height_blks, bytes_per_block,
+                                                      tile_h_log2, tile_d_log2);
+                if (off + bytes_per_block > src_size) return 0;
+                memcpy(d + z * image + y * row + (uint64_t)x * bytes_per_block, s + off, bytes_per_block);
+            }
+    return (size_t)(image * depth);
+}
+
 // 把一个 mip 从块线性解交错成行优先。dst_stride = 0 表示紧密排布。
 // 返回写出的字节数；src_size 不够就返回 0（宁可不解也不越界读客体内存）。
 size_t nvn_tex_detile(void *dst, size_t dst_cap, uint32_t dst_stride,

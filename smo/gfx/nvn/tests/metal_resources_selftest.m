@@ -93,6 +93,40 @@ int main(void) {
         nvn_view_state identity_view={.flags=NVN_VIEW_SWIZZLE,.swizzle={2,3,4,5}};
         id<MTLTexture> identity=nvn_metal_texture(device,&packaged,&identity_view,0);assert(identity);
         assert(identity.swizzle.red==MTLTextureSwizzleRed&&identity.swizzle.alpha==MTLTextureSwizzleAlpha);
+        /* 3D R8 4x4x4 (game volume textures) uploads and reads back in z → y → x order. */
+        {
+            uint8_t *volume=calloc(1,8192);assert(volume);
+            uint64_t volume_pool[8]={0},volume_object[24]={0};
+            nvn_st_ent *vp=nvn_st_new(volume_pool,4);assert(vp);vp->v[1]=(uintptr_t)volume;vp->v[2]=8192;
+            nvn_tex_layout vl={0};vl.width=vl.height=vl.depth=4;vl.layers=vl.mip_levels=1;vl.bytes_per_block=1;
+            vl.block_w=vl.block_h=vl.samples_x=vl.samples_y=1;vl.dims=3;
+            uint8_t vh=tex_adjust_tile_size(nvn_tex_default_tile_h(4,1,1),8,4),vd=tex_adjust_tile_size(tex_pick_tile_size(6),1,4);
+            for(unsigned z=0;z<4;z++)for(unsigned y=0;y<4;y++)for(unsigned x=0;x<4;x++)
+                volume[nvn_tex_block_offset3d(x,y,z,4,4,1,vh,vd)]=(uint8_t)(z*16+y*4+x+1);
+            nvn_resource_snapshot vt={.object=(uintptr_t)volume_object,
+                .words={0,4,4,4,1,1,0,2,1,(uintptr_t)volume_pool,0,0,0,0,0,9}};
+            id<MTLTexture> v3=nvn_metal_texture(device,&vt,NULL,0);assert(v3&&v3.textureType==MTLTextureType3D&&v3.depth==4);
+            uint8_t back[64];[v3 getBytes:back bytesPerRow:4 bytesPerImage:16 fromRegion:MTLRegionMake3D(0,0,0,4,4,4) mipmapLevel:0 slice:0];
+            for(unsigned i=0;i<64;i++)assert(back[i]==i+1);
+            /* A layer view of a 3D texture is invalid in Metal: must be rejected, not abort. */
+            nvn_view_state slice={.flags=NVN_VIEW_LAYERS,.base_layer=0,.layer_count=1};
+            assert(nvn_metal_texture(device,&vt,&slice,0)==v3||nvn_metal_texture(device,&vt,&slice,0)==nil);
+            free(volume);
+        }
+        /* One face of a cube viewed without a target becomes a 2D view (Metal aborts on Cube with 1 slice). */
+        {
+            uint8_t *faces=calloc(1,65536);assert(faces);
+            uint64_t cube_pool[8]={0},cube_object[24]={0};
+            nvn_st_ent *cp=nvn_st_new(cube_pool,4);assert(cp);cp->v[1]=(uintptr_t)faces;cp->v[2]=65536;
+            nvn_resource_snapshot ct={.object=(uintptr_t)cube_object,
+                .words={0,4,4,1,1,0x25,0,8,1,(uintptr_t)cube_pool,0,0,0,0,0,11}};
+            id<MTLTexture> cube=nvn_metal_texture(device,&ct,NULL,0);assert(cube&&cube.textureType==MTLTextureTypeCube);
+            nvn_view_state face={.flags=NVN_VIEW_LAYERS,.base_layer=3,.layer_count=1};
+            id<MTLTexture> one=nvn_metal_texture(device,&ct,&face,0);assert(one&&one.textureType==MTLTextureType2D);
+            nvn_view_state bad={.flags=NVN_VIEW_LAYERS|NVN_VIEW_TARGET,.base_layer=0,.layer_count=1,.target=8};
+            assert(nvn_metal_texture(device,&ct,&bad,0)==nil);
+            free(faces);
+        }
         texture.words[15]++;assert(nvn_metal_texture(device,&texture,NULL,0)!=tex);
         texture.words[5]=0;assert(!nvn_metal_texture(device,&texture,NULL,0));
         nvn_metal_resources_reset();nvn_st_reset();free(memory);free(packed_memory);

@@ -581,8 +581,27 @@ static int copied_array(const void *payload,size_t size,size_t element,int limit
  *            and the dispatch grid size at 0x200 (gl_NumWorkGroups).
  * Indirect dispatch reads its group counts on the GPU: Metal's indirect dispatch takes
  * them from the same buffer, but c0 needs them too, so they are copied into c0 by a blit. */
-static int compute_arguments(SMOGuestEncoder *e,id<MTLComputeCommandEncoder> encoder,SMOMetalShader *shader,
-                             const uint32_t groups[3],uint64_t indirect) {
+/* Driver bank c0, filled before the compute encoder opens: an indirect dispatch copies its
+ * group counts in with a blit, and Metal allows only one active encoder per command buffer
+ * (a blit opened while the compute encoder was active hung the GPU on CI). */
+static id<MTLBuffer> compute_driver_bank(SMOGuestEncoder *e,const uint32_t *groups,uint64_t indirect) {
+    SMORenderState *s=(SMORenderState *)e.renderState;
+    id<MTLBuffer> driver=[e.device newBufferWithLength:65536 options:MTLResourceStorageModeShared];
+    if(!driver)return nil;
+    uint8_t *bank=driver.contents;memset(bank,0,0x410);
+    for(unsigned r=0;r<16;r++){
+        NVNbufferRange range=s->storage[NVN_SHADER_STAGE_COMPUTE][r];uint32_t length=(uint32_t)MIN(range.size,(uint64_t)UINT32_MAX);
+        memcpy(bank+0x310+16*r,&range.address,8);memcpy(bank+0x310+16*r+8,&length,4);
+    }
+    if(groups)memcpy(bank+0x200,groups,12);
+    else{
+        NSUInteger offset=0;id<MTLBuffer> source=nvn_metal_buffer(e,indirect,12,&offset);if(!source)return nil;
+        id<MTLBlitCommandEncoder> blit=[e.command blitCommandEncoder];if(!blit)return nil;
+        [blit copyFromBuffer:source sourceOffset:offset toBuffer:driver destinationOffset:0x200 size:12];[blit endEncoding];
+    }
+    return driver;
+}
+static int compute_arguments(SMOGuestEncoder *e,id<MTLComputeCommandEncoder> encoder,SMOMetalShader *shader,id<MTLBuffer> driver) {
     SMORenderState *s=(SMORenderState *)e.renderState;
     const unsigned stage=NVN_SHADER_STAGE_COMPUTE;
     id<MTLArgumentEncoder> arguments=shader.arguments;
@@ -597,19 +616,7 @@ static int compute_arguments(SMOGuestEncoder *e,id<MTLComputeCommandEncoder> enc
             [arguments setBuffer:shader.constants offset:0 atIndex:aid];
             [encoder useResource:shader.constants usage:MTLResourceUsageRead];
         }else if([kind isEqualToString:@"driver"]){
-            id<MTLBuffer> driver=[e.device newBufferWithLength:65536 options:MTLResourceStorageModeShared];
-            if(!driver)return 0;
-            uint8_t *bank=driver.contents;memset(bank,0,0x410);
-            for(unsigned r=0;r<16;r++){
-                NVNbufferRange range=s->storage[stage][r];uint32_t length=(uint32_t)MIN(range.size,(uint64_t)UINT32_MAX);
-                memcpy(bank+0x310+16*r,&range.address,8);memcpy(bank+0x310+16*r+8,&length,4);
-            }
-            if(groups)memcpy(bank+0x200,groups,12);
-            else{
-                NSUInteger offset=0;id<MTLBuffer> source=nvn_metal_buffer(e,indirect,12,&offset);if(!source)return 0;
-                id<MTLBlitCommandEncoder> blit=[e.command blitCommandEncoder];if(!blit)return 0;
-                [blit copyFromBuffer:source sourceOffset:offset toBuffer:driver destinationOffset:0x200 size:12];[blit endEncoding];
-            }
+            if(!driver)return reject("compute driver bank");
             [arguments setBuffer:driver offset:0 atIndex:aid];
             [encoder useResource:driver usage:MTLResourceUsageRead];
         }else if([kind isEqualToString:@"cbuf"] || [kind isEqualToString:@"sbuf"]){
@@ -652,9 +659,13 @@ static int dispatch_compute(SMOGuestEncoder *e,const uint32_t *groups,uint64_t i
     if(pipeline.threadExecutionWidth!=32)return reject("compute SIMD width is not 32");
     if(threads.width*threads.height*threads.depth>pipeline.maxTotalThreadsPerThreadgroup)return reject("compute threadgroup exceeds device limit");
     nvn_metal_render_end(e);[e.blit endEncoding];e.blit=nil;
+    id<MTLBuffer> driver=nil;
+    for(NSDictionary *arg in cs.bindings[@"arguments"])if([arg[@"kind"] isEqualToString:@"driver"]){
+        driver=compute_driver_bank(e,groups,indirect);if(!driver)return 0;break;
+    }
     id<MTLComputeCommandEncoder> encoder=[e.command computeCommandEncoder];if(!encoder)return 0;
     [encoder setComputePipelineState:pipeline];
-    int ok=compute_arguments(e,encoder,cs,groups,indirect);
+    int ok=compute_arguments(e,encoder,cs,driver);
     if(ok){
         if(groups)[encoder dispatchThreadgroups:MTLSizeMake(groups[0],groups[1],groups[2]) threadsPerThreadgroup:threads];
         else{

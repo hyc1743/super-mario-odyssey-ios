@@ -215,6 +215,8 @@ id<MTLTexture> nvn_metal_texture(id<MTLDevice> device,const nvn_resource_snapsho
         d.storageMode=(p.depth||w[8]>1)?MTLStorageModePrivate:MTLStorageModeShared;
         d.usage=MTLTextureUsageShaderRead|MTLTextureUsagePixelFormatView;
         if(!p.compressed)d.usage|=MTLTextureUsageRenderTarget;
+        /* NVN_TEXTURE_FLAGS_IMAGE (0x4): the game writes it from compute shaders (imageStore). */
+        if((w[6]&0x4)&&!p.compressed&&!p.depth&&w[8]<=1)d.usage|=MTLTextureUsageShaderWrite;
         id<MTLTexture> texture=[device newTextureWithDescriptor:d];if(!texture)goto failure;
         if(!p.depth&&w[8]<=1&&!upload(texture,w,p,&l,(const uint8_t *)(uintptr_t)(pool->v[1]+w[10]),layer_stride,storage))goto failure;
         entry=[SMONVNMetalTexture new];entry.texture=texture;entry.resource=*s;entry.views=[NSMutableDictionary new];textures[key]=entry;

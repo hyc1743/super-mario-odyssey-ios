@@ -122,11 +122,7 @@ int nvn_cmd_missing_is_skippable(const char *name) {
         "nvnCommandBufferSetDepthBounds",
         "nvnCommandBufferSetRasterizerDiscard",
         "nvnCommandBufferSetPointSize",
-        "nvnCommandBufferClearTexture",
-        /* 计算着色器尚未实现：跳过这一次派发（缺一个后处理/粒子效果），
-         * 而不是让整条命令缓冲失败 → 整帧黑屏 */
-        "nvnCommandBufferDispatchCompute",
-        "nvnCommandBufferDispatchComputeIndirect"
+        "nvnCommandBufferClearTexture"
     };
     if(!name)return 0;
     for(size_t i=0;i<sizeof names/sizeof names[0];i++)if(!strcmp(name,names[i]))return 1;

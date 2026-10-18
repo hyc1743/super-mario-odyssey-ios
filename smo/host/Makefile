@@ -70,6 +70,9 @@ metal_resources_selftest: $(GFX_COMMON) ../gfx/nvn/nvn_metal_resources.m ../gfx/
 metal_render_selftest: $(GFX_COMMON) $(METAL_RUNTIME_SRC) ../gfx/nvn/tests/metal_render_selftest.m
 	$(CC) $(CFLAGS) $(INC) -DSMO_METAL_RUNTIME=1 -fobjc-arc -framework Metal -framework Foundation -o $@ $^
 
+metal_compute_selftest: $(GFX_COMMON) $(METAL_RUNTIME_SRC) ../gfx/nvn/tests/metal_compute_selftest.m
+	$(CC) $(CFLAGS) $(INC) -DSMO_METAL_RUNTIME=1 -fobjc-arc -framework Metal -framework Foundation -o $@ $^
+
 mtl_replay_selftest: $(GFX_COMMON) ../gfx/nvn/nvn_mtl.m ../gfx/nvn/tests/mtl_replay_selftest.c
 	$(CC) $(CFLAGS) $(INC) -fobjc-arc -framework Metal -framework Foundation -o $@ $^
 

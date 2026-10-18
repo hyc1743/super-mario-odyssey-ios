@@ -57,6 +57,8 @@ uint64_t nvn_CommandBufferBindBlendState(uint64_t a0, uint64_t a1, uint64_t a2, 
 uint64_t nvn_CommandBufferBindChannelMaskState(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 uint64_t nvn_CommandBufferBindColorState(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 uint64_t nvn_CommandBufferBindDepthStencilState(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+uint64_t nvn_CommandBufferBindImage(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+uint64_t nvn_CommandBufferBindImages(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 uint64_t nvn_CommandBufferBindMultisampleState(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 uint64_t nvn_CommandBufferBindPolygonState(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 uint64_t nvn_CommandBufferBindProgram(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
@@ -76,6 +78,8 @@ uint64_t nvn_CommandBufferClearColor(uint64_t a0, uint64_t a1, uint64_t a2, uint
 uint64_t nvn_CommandBufferClearDepthStencil(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 uint64_t nvn_CommandBufferCopyBufferToBuffer(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 uint64_t nvn_CommandBufferCopyCommands(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+uint64_t nvn_CommandBufferDispatchCompute(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+uint64_t nvn_CommandBufferDispatchComputeIndirect(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 uint64_t nvn_CommandBufferDrawArrays(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 uint64_t nvn_CommandBufferDrawArraysInstanced(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 uint64_t nvn_CommandBufferDrawElements(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
@@ -391,9 +395,7 @@ NVN_MISSING_COMMAND(nvnCommandBufferBarrierEPNS_11DrawContextENS)
 NVN_MISSING_COMMAND(nvnCommandBufferBarrier_ShaderEPNS_11DrawCon)
 NVN_MISSING_COMMAND(nvnCommandBufferBeginTransformFeedback)
 NVN_MISSING_COMMAND(nvnCommandBufferBindCoverageModulationTable)
-NVN_MISSING_COMMAND(nvnCommandBufferBindImage)
 NVN_MISSING_COMMAND(nvnCommandBufferBindImageEPNS_11DrawContextE)
-NVN_MISSING_COMMAND(nvnCommandBufferBindImages)
 NVN_MISSING_COMMAND(nvnCommandBufferBindSeparateSampler)
 NVN_MISSING_COMMAND(nvnCommandBufferBindSeparateSamplers)
 NVN_MISSING_COMMAND(nvnCommandBufferBindSeparateTexture)
@@ -411,8 +413,6 @@ NVN_MISSING_COMMAND(nvnCommandBufferCopyTextureToBuffer)
 NVN_MISSING_COMMAND(nvnCommandBufferCopyTextureToTexture)
 NVN_MISSING_COMMAND(nvnCommandBufferDiscardColor)
 NVN_MISSING_COMMAND(nvnCommandBufferDiscardDepthStencil)
-NVN_MISSING_COMMAND(nvnCommandBufferDispatchCompute)
-NVN_MISSING_COMMAND(nvnCommandBufferDispatchComputeIndirect)
 NVN_MISSING_COMMAND(nvnCommandBufferDownsample)
 NVN_MISSING_COMMAND(nvnCommandBufferDrawArraysIndirect)
 NVN_MISSING_COMMAND(nvnCommandBufferDrawElementsIndirect)
@@ -565,9 +565,7 @@ static const nvn_fn missing_commands[] = {
     (nvn_fn)missing_nvnCommandBufferBarrier_ShaderEPNS_11DrawCon,
     (nvn_fn)missing_nvnCommandBufferBeginTransformFeedback,
     (nvn_fn)missing_nvnCommandBufferBindCoverageModulationTable,
-    (nvn_fn)missing_nvnCommandBufferBindImage,
     (nvn_fn)missing_nvnCommandBufferBindImageEPNS_11DrawContextE,
-    (nvn_fn)missing_nvnCommandBufferBindImages,
     (nvn_fn)missing_nvnCommandBufferBindSeparateSampler,
     (nvn_fn)missing_nvnCommandBufferBindSeparateSamplers,
     (nvn_fn)missing_nvnCommandBufferBindSeparateTexture,
@@ -585,8 +583,6 @@ static const nvn_fn missing_commands[] = {
     (nvn_fn)missing_nvnCommandBufferCopyTextureToTexture,
     (nvn_fn)missing_nvnCommandBufferDiscardColor,
     (nvn_fn)missing_nvnCommandBufferDiscardDepthStencil,
-    (nvn_fn)missing_nvnCommandBufferDispatchCompute,
-    (nvn_fn)missing_nvnCommandBufferDispatchComputeIndirect,
     (nvn_fn)missing_nvnCommandBufferDownsample,
     (nvn_fn)missing_nvnCommandBufferDrawArraysIndirect,
     (nvn_fn)missing_nvnCommandBufferDrawElementsIndirect,
@@ -702,6 +698,8 @@ const char *const g_nvn_record_names[] = {
     "nvnCommandBufferBindChannelMaskState",
     "nvnCommandBufferBindColorState",
     "nvnCommandBufferBindDepthStencilState",
+    "nvnCommandBufferBindImage",
+    "nvnCommandBufferBindImages",
     "nvnCommandBufferBindMultisampleState",
     "nvnCommandBufferBindPolygonState",
     "nvnCommandBufferBindProgram",
@@ -721,6 +719,8 @@ const char *const g_nvn_record_names[] = {
     "nvnCommandBufferClearDepthStencil",
     "nvnCommandBufferCopyBufferToBuffer",
     "nvnCommandBufferCopyCommands",
+    "nvnCommandBufferDispatchCompute",
+    "nvnCommandBufferDispatchComputeIndirect",
     "nvnCommandBufferDrawArrays",
     "nvnCommandBufferDrawArraysInstanced",
     "nvnCommandBufferDrawElements",
@@ -1027,7 +1027,7 @@ const char *const g_nvn_record_names[] = {
     "nvnWindowSetDebugLabel",
     "nvnWindowSetPresentInterval",
 };
-const unsigned g_nvn_record_n = 374;
+const unsigned g_nvn_record_n = 378;
 
 const nvn_ent g_nvn_table[] = {
     {"nvnBlendStateGetAdvancedMode", (nvn_fn)nvn_BlendStateGetAdvancedMode},
@@ -1085,9 +1085,9 @@ const nvn_ent g_nvn_table[] = {
     {"nvnCommandBufferBindColorState", (nvn_fn)nvn_CommandBufferBindColorState},
     {"nvnCommandBufferBindCoverageModulationTable", (nvn_fn)missing_nvnCommandBufferBindCoverageModulationTable},
     {"nvnCommandBufferBindDepthStencilState", (nvn_fn)nvn_CommandBufferBindDepthStencilState},
-    {"nvnCommandBufferBindImage", (nvn_fn)missing_nvnCommandBufferBindImage},
+    {"nvnCommandBufferBindImage", (nvn_fn)nvn_CommandBufferBindImage},
     {"nvnCommandBufferBindImageEPNS_11DrawContextE", (nvn_fn)missing_nvnCommandBufferBindImageEPNS_11DrawContextE},
-    {"nvnCommandBufferBindImages", (nvn_fn)missing_nvnCommandBufferBindImages},
+    {"nvnCommandBufferBindImages", (nvn_fn)nvn_CommandBufferBindImages},
     {"nvnCommandBufferBindMultisampleState", (nvn_fn)nvn_CommandBufferBindMultisampleState},
     {"nvnCommandBufferBindPolygonState", (nvn_fn)nvn_CommandBufferBindPolygonState},
     {"nvnCommandBufferBindProgram", (nvn_fn)nvn_CommandBufferBindProgram},
@@ -1124,8 +1124,8 @@ const nvn_ent g_nvn_table[] = {
     {"nvnCommandBufferCopyTextureToTexture", (nvn_fn)missing_nvnCommandBufferCopyTextureToTexture},
     {"nvnCommandBufferDiscardColor", (nvn_fn)missing_nvnCommandBufferDiscardColor},
     {"nvnCommandBufferDiscardDepthStencil", (nvn_fn)missing_nvnCommandBufferDiscardDepthStencil},
-    {"nvnCommandBufferDispatchCompute", (nvn_fn)missing_nvnCommandBufferDispatchCompute},
-    {"nvnCommandBufferDispatchComputeIndirect", (nvn_fn)missing_nvnCommandBufferDispatchComputeIndirect},
+    {"nvnCommandBufferDispatchCompute", (nvn_fn)nvn_CommandBufferDispatchCompute},
+    {"nvnCommandBufferDispatchComputeIndirect", (nvn_fn)nvn_CommandBufferDispatchComputeIndirect},
     {"nvnCommandBufferDownsample", (nvn_fn)missing_nvnCommandBufferDownsample},
     {"nvnCommandBufferDrawArrays", (nvn_fn)nvn_CommandBufferDrawArrays},
     {"nvnCommandBufferDrawArraysIndirect", (nvn_fn)missing_nvnCommandBufferDrawArraysIndirect},
@@ -1501,4 +1501,4 @@ const nvn_ent g_nvn_table[] = {
     {"nvnWindowSetPresentInterval", (nvn_fn)nvn_WindowSetPresentInterval},
 };
 const unsigned g_nvn_table_n = 469;
-const unsigned g_nvn_impl_n = 374;
+const unsigned g_nvn_impl_n = 378;

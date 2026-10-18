@@ -37,13 +37,15 @@
     NVNbufferRange vertex[32],uniforms[6][32],storage[6][32];
     uint64_t handles[4][6][128];
     uint64_t texture_pool,sampler_pool;
-    uint64_t programDevice;
+    uint64_t programDevice,computeDevice;
     float viewports[16][4],depth_ranges[16][2],blend_color[4];
     int32_t scissors[16][4];
     unsigned viewport_count,scissor_count;
 }
 @property(nonatomic,strong) SMOMetalShader *vs;
 @property(nonatomic,strong) SMOMetalShader *fs;
+@property(nonatomic,strong) SMOMetalShader *cs;
+@property(nonatomic,strong) NSMutableDictionary<NSString *,id<MTLComputePipelineState>> *computePipelines;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,SMOMetalShader *> *shaders;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,id<MTLRenderPipelineState>> *pipelines;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,NSNumber *> *drawGenerations;
@@ -62,7 +64,7 @@ NSObject *nvn_metal_render_state(void) {
     NVNdepthStencilState d;nvn_DepthStencilStateSetDefaults(&d);s->depth=nvn_depth_snapshot(&d);
     NVNpolygonState p;nvn_PolygonStateSetDefaults(&p);s->polygon=nvn_polygon_snapshot(&p);
     for(unsigned i=0;i<16;i++)s->depth_ranges[i][1]=1;
-    s.shaders=[NSMutableDictionary new];s.pipelines=[NSMutableDictionary new];
+    s.shaders=[NSMutableDictionary new];s.pipelines=[NSMutableDictionary new];s.computePipelines=[NSMutableDictionary new];
     s.drawGenerations=[NSMutableDictionary new];
     s.diagnosedDrawStates=[NSMutableSet new];
     return s;
@@ -146,7 +148,7 @@ static SMOMetalShader *load_shader(SMOGuestEncoder *e,const nvn_shader_ent *entr
     SMORenderState *s=(SMORenderState *)e.renderState;
     NSString *filename=[NSString stringWithUTF8String:entry->msl];
     NSString *key=filename.stringByDeletingPathExtension;
-    if(entry->stage!=1)depthMode=1;
+    if(entry->stage!=1)depthMode=1;  /* depth variants exist only for vertex shaders */
     if(depthMode!=0&&depthMode!=1){reject("device depth mode");return nil;}
     NSString *cacheKey=[NSString stringWithFormat:@"%@:%d",key,depthMode];
     SMOMetalShader *cached=s.shaders[cacheKey];if(cached)return cached;
@@ -571,6 +573,102 @@ static int copied_array(const void *payload,size_t size,size_t element,int limit
        size!=((sizeof *header+(size_t)header->count*element+7)&~(size_t)7))return 0;
     *values=(const uint8_t *)payload+sizeof *header;return 1;
 }
+/* Compute dispatch. Bindings follow the fixture metadata written by
+ * smo/gfx/tools/compute/compute_fixture.py:
+ *   cbuf r → uniform buffer r of the compute stage; sbuf r → storage buffer r;
+ *   constant → shader c1 bank; image r → image handle r (texture pool, image registration);
+ *   driver → NVN driver bank c0: storage table at 0x310 + 16 r ({address u64, size u32})
+ *            and the dispatch grid size at 0x200 (gl_NumWorkGroups).
+ * Indirect dispatch reads its group counts on the GPU: Metal's indirect dispatch takes
+ * them from the same buffer, but c0 needs them too, so they are copied into c0 by a blit. */
+static int compute_arguments(SMOGuestEncoder *e,id<MTLComputeCommandEncoder> encoder,SMOMetalShader *shader,
+                             const uint32_t groups[3],uint64_t indirect) {
+    SMORenderState *s=(SMORenderState *)e.renderState;
+    const unsigned stage=NVN_SHADER_STAGE_COMPUTE;
+    id<MTLArgumentEncoder> arguments=shader.arguments;
+    if(!arguments)return 1;
+    id<MTLBuffer> args=[e.device newBufferWithLength:arguments.encodedLength options:MTLResourceStorageModeShared];
+    if(!args)return 0;
+    [arguments setArgumentBuffer:args offset:0];
+    for(NSDictionary *arg in shader.bindings[@"arguments"]){
+        unsigned aid=[arg[@"id"] unsignedIntValue];NSString *kind=arg[@"kind"];
+        if([kind isEqualToString:@"constant"]){
+            if(!shader.constants)return reject("missing compute constant segment");
+            [arguments setBuffer:shader.constants offset:0 atIndex:aid];
+            [encoder useResource:shader.constants usage:MTLResourceUsageRead];
+        }else if([kind isEqualToString:@"driver"]){
+            id<MTLBuffer> driver=[e.device newBufferWithLength:65536 options:MTLResourceStorageModeShared];
+            if(!driver)return 0;
+            uint8_t *bank=driver.contents;memset(bank,0,0x410);
+            for(unsigned r=0;r<16;r++){
+                NVNbufferRange range=s->storage[stage][r];uint32_t length=(uint32_t)MIN(range.size,(uint64_t)UINT32_MAX);
+                memcpy(bank+0x310+16*r,&range.address,8);memcpy(bank+0x310+16*r+8,&length,4);
+            }
+            if(groups)memcpy(bank+0x200,groups,12);
+            else{
+                NSUInteger offset=0;id<MTLBuffer> source=nvn_metal_buffer(e,indirect,12,&offset);if(!source)return 0;
+                id<MTLBlitCommandEncoder> blit=[e.command blitCommandEncoder];if(!blit)return 0;
+                [blit copyFromBuffer:source sourceOffset:offset toBuffer:driver destinationOffset:0x200 size:12];[blit endEncoding];
+            }
+            [arguments setBuffer:driver offset:0 atIndex:aid];
+            [encoder useResource:driver usage:MTLResourceUsageRead];
+        }else if([kind isEqualToString:@"cbuf"] || [kind isEqualToString:@"sbuf"]){
+            int slot=[arg[@"nvn_slot"] intValue];if(!arg[@"nvn_slot"] || slot<0 || slot>=32)return reject("compute buffer slot");
+            int storage=[kind isEqualToString:@"sbuf"];
+            NVNbufferRange range=storage?s->storage[stage][slot]:s->uniforms[stage][slot];
+            if(!range.size)return reject("unbound compute buffer");
+            NSUInteger offset=0;id<MTLBuffer> buffer=nvn_metal_buffer(e,range.address,range.size,&offset);if(!buffer)return 0;
+            [arguments setBuffer:buffer offset:offset atIndex:aid];
+            [encoder useResource:buffer usage:storage?MTLResourceUsageRead|MTLResourceUsageWrite:MTLResourceUsageRead];
+        }else if([kind isEqualToString:@"image"]){
+            int slot=[arg[@"nvn_slot"] intValue];if(!arg[@"nvn_slot"] || slot<0 || slot>=128)return reject("compute image slot");
+            uint64_t handle=s->handles[NVN_BIND_IMAGE][stage][slot];
+            nvn_resource_snapshot resource;nvn_view_state view;
+            if(!nvn_resources_texture((void *)(uintptr_t)s->texture_pool,(uint32_t)(handle&0xfffff),1,&resource,&view))
+                return reject("unregistered compute image descriptor");
+            id<MTLTexture> texture=nvn_metal_texture(e.device,&resource,&view,0);if(!texture)return 0;
+            if(!(texture.usage&MTLTextureUsageShaderWrite))return reject("compute image without NVN_TEXTURE_FLAGS_IMAGE");
+            [arguments setTexture:texture atIndex:aid];
+            [encoder useResource:texture usage:MTLResourceUsageRead|MTLResourceUsageWrite];
+        }else return reject("compute argument kind");
+    }
+    [encoder setBuffer:args offset:0 atIndex:[shader.bindings[@"argument_buffer"] unsignedIntegerValue]];
+    return 1;
+}
+static int dispatch_compute(SMOGuestEncoder *e,const uint32_t *groups,uint64_t indirect) {
+    SMORenderState *s=(SMORenderState *)e.renderState;
+    SMOMetalShader *cs=s.cs;
+    if(!cs){skip_draw("compute dispatch without a matched compute shader");return 1;}
+    NSArray *size=cs.bindings[@"threadgroup_size"];
+    if(![size isKindOfClass:NSArray.class] || size.count!=3)return reject("compute threadgroup size");
+    MTLSize threads=MTLSizeMake([size[0] unsignedIntegerValue],[size[1] unsignedIntegerValue],[size[2] unsignedIntegerValue]);
+    id<MTLComputePipelineState> pipeline=s.computePipelines[cs.cacheKey];
+    if(!pipeline){
+        NSError *error=nil;pipeline=[e.device newComputePipelineStateWithFunction:cs.function error:&error];
+        if(!pipeline){NVN_LOG("NVN_METAL_COMPUTE_PIPELINE_FAILED domain=%s code=%ld",error.domain.UTF8String?:"unknown",(long)error.code);return 0;}
+        s.computePipelines[cs.cacheKey]=pipeline;
+    }
+    /* Maxwell lane ids are 0..31; spirv-cross maps them to thread_index_in_simdgroup. */
+    if(pipeline.threadExecutionWidth!=32)return reject("compute SIMD width is not 32");
+    if(threads.width*threads.height*threads.depth>pipeline.maxTotalThreadsPerThreadgroup)return reject("compute threadgroup exceeds device limit");
+    nvn_metal_render_end(e);[e.blit endEncoding];e.blit=nil;
+    id<MTLComputeCommandEncoder> encoder=[e.command computeCommandEncoder];if(!encoder)return 0;
+    [encoder setComputePipelineState:pipeline];
+    int ok=compute_arguments(e,encoder,cs,groups,indirect);
+    if(ok){
+        if(groups)[encoder dispatchThreadgroups:MTLSizeMake(groups[0],groups[1],groups[2]) threadsPerThreadgroup:threads];
+        else{
+            NSUInteger offset=0;id<MTLBuffer> buffer=nvn_metal_buffer(e,indirect,12,&offset);
+            if(buffer)[encoder dispatchThreadgroupsWithIndirectBuffer:buffer indirectBufferOffset:offset threadsPerThreadgroup:threads];
+            else ok=0;
+        }
+    }
+    [encoder endEncoding];
+    static unsigned logged;
+    if(ok && logged<8){logged++;NVN_LOG("NVN_METAL_COMPUTE_DISPATCH key=%s threads=%lux%lux%lu groups=%s",
+        cs.cacheKey.UTF8String,(unsigned long)threads.width,(unsigned long)threads.height,(unsigned long)threads.depth,groups?"direct":"indirect");}
+    return ok;
+}
 int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,size_t size) {
     SMORenderState *s=(SMORenderState *)e.renderState;
 #define READ(type,name) type name; if(size!=sizeof name)return 0;memcpy(&name,payload,sizeof name)
@@ -639,10 +737,24 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
     case NVN_CMD_BIND_PROGRAM:{
         READ(nvn_cmd_program,p);unsigned count=(unsigned)p.resource.words[1];if(count>6)return 0;
         /* NVN keeps compute and graphics bindings separate: binding a compute program
-         * (stages=NVN_SHADER_STAGE_COMPUTE_BIT) leaves the current VS/FS untouched. Compute
-         * dispatch is skipped for now, so there is nothing to resolve.
+         * (stages=NVN_SHADER_STAGE_COMPUTE_BIT) leaves the current VS/FS untouched.
          * 真机 v0.6.15：×996 stages=32 candidates=0，每次都把图形着色器清空了。 */
-        if(!(p.stages&NVN_SHADER_STAGE_ALL_GRAPHICS_BITS)){skip_draw("compute program bind (dispatch unsupported)");return 1;}
+        if(p.stages&NVN_SHADER_STAGE_COMPUTE_BIT){
+            s.cs=nil;
+            for(unsigned i=0;i<count;i++){
+                nvn_shader_match match;const nvn_shader_ent *entry=nvn_shader_find_gpu(p.resource.words[2+i*2],&match);
+                if(!entry){
+                    NVN_LOG("NVN_SHADER_EXEC_MATCH_FAILED program=%llu index=%u stages=%llu candidates=%u matches=%u",
+                        (unsigned long long)p.resource.words[15],i,(unsigned long long)p.stages,match.candidates,match.matches);
+                    nvn_shader_capture_gpu(p.resource.words[2+i*2],p.resource.words[15],i);
+                    continue;
+                }
+                if(entry->stage!=0)continue;
+                s.cs=load_shader(e,entry,1);
+                s->computeDevice=p.resource.words[0];
+            }
+            if(!(p.stages&NVN_SHADER_STAGE_ALL_GRAPHICS_BITS))return 1;
+        }
         s->programDevice=p.resource.words[0];
         if(p.stages&1)s.vs=nil;if(p.stages&2)s.fs=nil;
         for(unsigned i=0;i<count;i++){
@@ -654,6 +766,7 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
                 /* 程序匹配不上：已按 p.stages 清掉被替换的阶段，后续绘制在 prepare_draw 里逐条跳过 */
                 continue;
             }
+            if(entry->stage==0)continue;  /* compute stage handled above */
             unsigned stage=entry->stage==1?0:entry->stage==5?1:UINT_MAX;
             if(stage==UINT_MAX){s.vs=nil;s.fs=nil;skip_draw("geometry/tessellation shader");return 1;}
             if(!(p.stages&(1u<<stage)))continue;
@@ -670,6 +783,17 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
     }
     case NVN_CMD_BLEND_COLOR:if(size!=sizeof s->blend_color)return 0;memcpy(s->blend_color,payload,size);return 1;
     case NVN_CMD_SCRATCH:/* Register spilling is allocated by the Metal compiler/runtime. */return size==sizeof(nvn_cmd_scratch);
+    case NVN_CMD_DISPATCH:{
+        READ(nvn_cmd_dispatch,p);
+        if(!p.groups[0]||!p.groups[1]||!p.groups[2])return 1;
+        return dispatch_compute(e,p.groups,0)||skip_draw("compute dispatch (see preceding diagnostic)");
+    }
+    case NVN_CMD_DISPATCH_INDIRECT:{
+        READ(nvn_cmd_dispatch_indirect,p);uint32_t groups[3];
+        NSUInteger offset=0;id<MTLBuffer> buffer=nvn_metal_buffer(e,p.address,sizeof groups,&offset);
+        if(!buffer)return skip_draw("unmapped indirect dispatch buffer");
+        return dispatch_compute(e,groups,p.address)||skip_draw("compute dispatch (see preceding diagnostic)");
+    }
     case NVN_CMD_DRAW:{
         READ(nvn_cmd_draw,p);if(p.count<0||p.first<0||p.instances<0||p.base_instance<0)return 0;if(!p.count||!p.instances)return 1;
         MTLPrimitiveType primitive;if(!primitive_type(p.primitive,&primitive))return skip_draw("primitive topology");

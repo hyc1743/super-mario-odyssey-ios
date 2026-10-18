@@ -9,7 +9,8 @@ enum {
     NVN_CMD_CLEAR_COLOR, NVN_CMD_CLEAR_DEPTH, NVN_CMD_BIND_STATE, NVN_CMD_BIND_VATTR,
     NVN_CMD_BIND_VSTREAM, NVN_CMD_BIND_BUFFER, NVN_CMD_BIND_PROGRAM,
     NVN_CMD_SET_POOL, NVN_CMD_BIND_HANDLES, NVN_CMD_SCRATCH, NVN_CMD_COUNTER,
-    NVN_CMD_DRAW, NVN_CMD_DRAW_INDEXED, NVN_CMD_DISPATCH, NVN_CMD_BLEND_COLOR
+    NVN_CMD_DRAW, NVN_CMD_DRAW_INDEXED, NVN_CMD_DISPATCH, NVN_CMD_BLEND_COLOR,
+    NVN_CMD_DISPATCH_INDIRECT
 };
 enum { NVN_STATE_BLEND, NVN_STATE_COLOR, NVN_STATE_CHANNEL, NVN_STATE_DEPTH,
        NVN_STATE_POLYGON, NVN_STATE_MULTISAMPLE };
@@ -29,4 +30,6 @@ typedef struct { uint64_t pool, offset, size; } nvn_cmd_scratch;
 typedef struct { uint64_t type, address; } nvn_cmd_counter;
 typedef struct { int32_t primitive, first, count, base_instance, instances, reserved; } nvn_cmd_draw;
 typedef struct { int32_t primitive, index_type, count, base_vertex, base_instance, instances; uint64_t address; } nvn_cmd_draw_indexed;
+typedef struct { uint32_t groups[3], reserved; } nvn_cmd_dispatch;
+typedef struct { uint64_t address; } nvn_cmd_dispatch_indirect;  /* three uint32 group counts in GPU memory */
 #endif

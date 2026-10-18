@@ -108,7 +108,6 @@ static void overflow_lifetime(void) {
 int main(void) {
     assert(nvn_cmd_missing_is_skippable("nvnCommandBufferSetDepthClamp"));
     assert(nvn_cmd_missing_is_skippable("nvnCommandBufferClearTexture"));
-    assert(nvn_cmd_missing_is_skippable("nvnCommandBufferDispatchComputeIndirect"));
     assert(!nvn_cmd_missing_is_skippable("nvnCommandBufferDrawTexture"));
     NVNcommandBuffer a,b;
     uint32_t input[4]={1,2,3,4}, output[4]={0}, copied[4]={0};

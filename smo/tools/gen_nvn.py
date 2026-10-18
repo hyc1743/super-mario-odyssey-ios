@@ -60,6 +60,7 @@ COMMAND_IMPLEMENTED = {"nvnCommandBuffer" + suffix for suffix in (
     "BindStorageBuffer", "BindStorageBuffers", "BindProgram", "SetTexturePool", "SetSamplerPool",
     "BindTexture", "BindTextures", "SetBlendColor", "SetShaderScratchMemory", "ReportCounter",
     "DrawArrays", "DrawArraysInstanced", "DrawElements", "DrawElementsInstanced", "DrawElementsBaseVertex",
+    "DispatchCompute", "DispatchComputeIndirect", "BindImage", "BindImages",
 )}
 QUEUE_IMPLEMENTED = {"nvnQueue" + suffix for suffix in (
     "BuilderSetDefaults", "BuilderSetDevice", "BuilderSetFlags",

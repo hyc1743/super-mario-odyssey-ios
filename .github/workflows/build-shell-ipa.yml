@@ -154,7 +154,7 @@ jobs:
       - name: macOS：逐个 C 单测（每个失败立刻进注解，不依赖日志文件）
         run: |
           set -o pipefail
-          TARGETS="cmd_selftest queue_selftest cmd_render_selftest render_state_selftest resources_selftest metal_queue_selftest metal_resources_selftest metal_render_selftest applogic_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest embed_selftest gate_stack_selftest"
+          TARGETS="cmd_selftest queue_selftest cmd_render_selftest render_state_selftest resources_selftest metal_queue_selftest metal_resources_selftest metal_render_selftest metal_compute_selftest applogic_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest embed_selftest gate_stack_selftest"
           if ! make -C smo/host $TARGETS PY=python3 > /tmp/build.log 2>&1; then
             echo "::error::[macOS] 单测编译/链接失败"
             tail -25 /tmp/build.log | while IFS= read -r l; do echo "::error::[macOS 编译] $l"; done

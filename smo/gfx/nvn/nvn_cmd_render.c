@@ -154,6 +154,22 @@ void nvn_CommandBufferBindTextures(NVNcommandBuffer *c,NVNshaderStage stage,int 
 void nvn_CommandBufferBindTexture(NVNcommandBuffer *c,NVNshaderStage stage,int index,NVNtextureHandle h) {
     handles(c,NVN_BIND_TEXTURE,stage,index,1,&h);
 }
+void nvn_CommandBufferBindImages(NVNcommandBuffer *c,NVNshaderStage stage,int first,int count,const NVNimageHandle *h) {
+    handles(c,NVN_BIND_IMAGE,stage,first,count,h);
+}
+void nvn_CommandBufferBindImage(NVNcommandBuffer *c,NVNshaderStage stage,int index,NVNimageHandle h) {
+    handles(c,NVN_BIND_IMAGE,stage,index,1,&h);
+}
+void nvn_CommandBufferDispatchCompute(NVNcommandBuffer *c,int x,int y,int z) {
+    if (x<0 || y<0 || z<0) NVN_DIE("invalid DispatchCompute");
+    nvn_cmd_dispatch p={{(uint32_t)x,(uint32_t)y,(uint32_t)z},0};
+    memcpy(nvn_cmd_alloc(c,NVN_CMD_DISPATCH,sizeof p),&p,sizeof p);
+}
+void nvn_CommandBufferDispatchComputeIndirect(NVNcommandBuffer *c,NVNbufferAddress address) {
+    if (address & 3) NVN_DIE("unaligned DispatchComputeIndirect");
+    nvn_cmd_dispatch_indirect p={address};
+    memcpy(nvn_cmd_alloc(c,NVN_CMD_DISPATCH_INDIRECT,sizeof p),&p,sizeof p);
+}
 void nvn_CommandBufferSetBlendColor(NVNcommandBuffer *c,const float *v) {
     if (!v) NVN_DIE("null blend color");
     memcpy(nvn_cmd_alloc(c,NVN_CMD_BLEND_COLOR,16),v,16);

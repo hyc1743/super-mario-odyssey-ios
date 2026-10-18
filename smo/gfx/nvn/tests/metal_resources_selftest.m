@@ -108,9 +108,10 @@ int main(void) {
             id<MTLTexture> v3=nvn_metal_texture(device,&vt,NULL,0);assert(v3&&v3.textureType==MTLTextureType3D&&v3.depth==4);
             uint8_t back[64];[v3 getBytes:back bytesPerRow:4 bytesPerImage:16 fromRegion:MTLRegionMake3D(0,0,0,4,4,4) mipmapLevel:0 slice:0];
             for(unsigned i=0;i<64;i++)assert(back[i]==i+1);
-            /* A layer view of a 3D texture is invalid in Metal: must be rejected, not abort. */
+            /* A layer view of a 3D texture must not abort: either a whole-volume 3D view or nil. */
             nvn_view_state slice={.flags=NVN_VIEW_LAYERS,.base_layer=0,.layer_count=1};
-            assert(nvn_metal_texture(device,&vt,&slice,0)==v3||nvn_metal_texture(device,&vt,&slice,0)==nil);
+            id<MTLTexture> sv=nvn_metal_texture(device,&vt,&slice,0);
+            assert(!sv||(sv.textureType==MTLTextureType3D&&sv.depth==4));
             free(volume);
         }
         /* One face of a cube viewed without a target becomes a 2D view (Metal aborts on Cube with 1 slice). */

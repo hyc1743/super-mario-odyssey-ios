@@ -789,10 +789,11 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
         return dispatch_compute(e,p.groups,0)||skip_draw("compute dispatch (see preceding diagnostic)");
     }
     case NVN_CMD_DISPATCH_INDIRECT:{
-        READ(nvn_cmd_dispatch_indirect,p);uint32_t groups[3];
-        NSUInteger offset=0;id<MTLBuffer> buffer=nvn_metal_buffer(e,p.address,sizeof groups,&offset);
+        READ(nvn_cmd_dispatch_indirect,p);
+        /* Group counts are read by the GPU (dispatchThreadgroupsWithIndirectBuffer); groups=NULL selects that path. */
+        NSUInteger offset=0;id<MTLBuffer> buffer=nvn_metal_buffer(e,p.address,12,&offset);
         if(!buffer)return skip_draw("unmapped indirect dispatch buffer");
-        return dispatch_compute(e,groups,p.address)||skip_draw("compute dispatch (see preceding diagnostic)");
+        return dispatch_compute(e,NULL,p.address)||skip_draw("compute dispatch (see preceding diagnostic)");
     }
     case NVN_CMD_DRAW:{
         READ(nvn_cmd_draw,p);if(p.count<0||p.first<0||p.instances<0||p.base_instance<0)return 0;if(!p.count||!p.instances)return 1;

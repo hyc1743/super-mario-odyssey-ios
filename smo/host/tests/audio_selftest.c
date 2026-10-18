@@ -284,9 +284,11 @@ int main(void) {
     int auto_frames=atomic_load(&processed)-prior;
     clock_gettime(CLOCK_MONOTONIC,&t1);
     /* The 5 ms clock renders late periods back to back, so the count tracks wall time.
-     * An update-driven mix loop would add one frame per update (+10) on top. */
+     * The ticker thread's clock started before this renderer opened (earlier sessions in
+     * this test), so up to 8 owed periods can be caught up immediately after start.
+     * An update-driven mix loop would add one frame per update on top of that. */
     long periods=((t1.tv_sec-t0.tv_sec)*1000000000L+(t1.tv_nsec-t0.tv_nsec))/5000000L;
-    CHECK(auto_frames>=1 && auto_frames<=periods+2);
+    CHECK(auto_frames>=1 && auto_frames<=periods+8);
     close_renderer(handle);
     free(allocation);
     // Native boot previously aborted while polling this uninitialized event.

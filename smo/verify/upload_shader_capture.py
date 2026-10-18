@@ -18,7 +18,10 @@ def archive_captures(directory, frame_directory=None):
     files = sorted([*directory.glob("shader-*.bin"), *directory.glob("metal-error-*.txt")])
     if len(files) > 24 or any(p.stat().st_size > 65536 for p in files):
         raise ValueError("shader capture exceeds bounded diagnostic limits")
-    frames = sorted(frame_directory.glob("frame-*.ppm")) if frame_directory else []
+    # frame-recent-*.ppm only feed the local packaging gate; keep the upload to the
+    # first two frames and the latest one.
+    frames = sorted(p for p in frame_directory.glob("frame-*.ppm")
+                    if not p.name.startswith("frame-recent-")) if frame_directory else []
     if len(frames) > 3 or any(p.stat().st_size > 13 * 1024 * 1024 for p in frames):
         raise ValueError("frame capture exceeds bounded diagnostic limits")
     if not files and not frames:

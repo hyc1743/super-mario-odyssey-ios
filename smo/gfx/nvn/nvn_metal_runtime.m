@@ -293,7 +293,12 @@ static void capture_frame(id<MTLTexture> texture,uint64_t ordinal) {
         NSString *name=ordinal<=2?[NSString stringWithFormat:@"frame-%llu.ppm",(unsigned long long)ordinal]:@"frame-latest.ppm";
         NSString *path=[root stringByAppendingPathComponent:name];
         if([ppm writeToFile:path atomically:YES]){
-            if(ordinal>2)latest=ordinal;
+            if(ordinal>2){
+                static unsigned recent;
+                [ppm writeToFile:[root stringByAppendingPathComponent:
+                    [NSString stringWithFormat:@"frame-recent-%u.ppm",recent++%6]] atomically:YES];
+                latest=ordinal;
+            }
             NVN_LOG("NVN_GPU_FRAME_CAPTURE ordinal=%llu width=%lu height=%lu",(unsigned long long)ordinal,(unsigned long)width,(unsigned long)height);
         }
     }

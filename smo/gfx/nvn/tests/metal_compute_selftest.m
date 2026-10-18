@@ -8,6 +8,7 @@
 #include "../nvn_state.h"
 #include "../nvn_shader.h"
 #include "../nvn_gpu.h"
+#include "../nvn_render_state.h"
 #include <assert.h>
 #include <unistd.h>
 #define P(x) ((uint64_t)(uintptr_t)(x))
@@ -21,14 +22,14 @@ static uint64_t call(const char *name,void *obj,uint64_t a,uint64_t b,uint64_t c
  * driver bank (c0 + 0x200) and the storage address table (c0 + 0x310) just to prove
  * the runtime fills them; lane id comes from thread_index_in_simdgroup like the
  * translated game kernels. */
-static NSString *const kernelSource=@
-    "#include <metal_stdlib>\nusing namespace metal;\n"
-    "struct A{constant float4 *cp_c3[[id(0)]];device float *cp_s0[[id(1)]];device float *cp_s1[[id(2)]];constant uint4 *cp_c0[[id(3)]];};\n"
-    "kernel void main0(constant A &a[[buffer(0)]],uint3 g[[threadgroup_position_in_grid]],uint lane[[thread_index_in_simdgroup]]){\n"
-    "  uint i=g.x*32u+lane; uint count=as_type<uint>(a.cp_c3[0].x); if(i>=count)return;\n"
-    "  uint groups=a.cp_c0[0x200/16].x; uint has_in=a.cp_c0[0x310/16].z;\n"
-    "  a.cp_s1[i]=a.cp_s0[i]*a.cp_c3[0].y+float(groups)+(has_in?0.0f:1000.0f);\n"
-    "}\n";
+#define KERNEL_SOURCE \
+    "#include <metal_stdlib>\nusing namespace metal;\n" \
+    "struct A{constant float4 *cp_c3[[id(0)]];device float *cp_s0[[id(1)]];device float *cp_s1[[id(2)]];constant uint4 *cp_c0[[id(3)]];};\n" \
+    "kernel void main0(constant A &a[[buffer(0)]],uint3 g[[threadgroup_position_in_grid]],uint lane[[thread_index_in_simdgroup]]){\n" \
+    "  uint i=g.x*32u+lane; uint count=as_type<uint>(a.cp_c3[0].x); if(i>=count)return;\n" \
+    "  uint groups=a.cp_c0[0x200/16].x; uint has_in=a.cp_c0[0x310/16].z;\n" \
+    "  a.cp_s1[i]=a.cp_s0[i]*a.cp_c3[0].y+float(groups)+(has_in?0.0f:1000.0f);\n" \
+    "}\n"
 
 int main(void) {
     @autoreleasepool {
@@ -48,7 +49,7 @@ int main(void) {
         fprintf(index,"%016llx\t0\t%s.metal\t192\t%016llx\t%016llx\t%016llx\n",(unsigned long long)key,name.UTF8String,
             (unsigned long long)prefix,(unsigned long long)key,(unsigned long long)prefix);
         fclose(index);
-        assert([kernelSource writeToFile:[root stringByAppendingPathComponent:[name stringByAppendingString:@".metal"]]
+        assert([@KERNEL_SOURCE writeToFile:[root stringByAppendingPathComponent:[name stringByAppendingString:@".metal"]]
             atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
         NSDictionary *bindings=@{@"version":@1,@"key":name,@"stage":@0,@"entry":@"main0",@"argument_buffer":@0,
             @"threadgroup_size":@[@32,@1,@1],@"vertex_inputs":@[],@"unsupported_arguments":@[],

@@ -312,7 +312,14 @@ jobs:
           path = '/tmp/boot-shaders.zip'
           assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == '97cfbed25e77df064fe0c564a7f56495f73d3f727c4e210d1f395e0e863c1951'
           PY
-            python3 smo/ios/tools/prepare_runtime_shaders.py /tmp/boot-shaders.zip /tmp/smo-device-shaders
+            # 计算着色器（smo/gfx/tools/compute/compute_fixture.py 的产物，alComputeShader 24 个核）
+            curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN"               -H "Accept: application/vnd.github.raw+json"               "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-compute-shaders.zip?ref=13e0b26152050b3f6de8f2dfe12ab691658a9c17"               -o /tmp/boot-compute-shaders.zip
+            python3 - <<'PY'
+          import hashlib
+          path = '/tmp/boot-compute-shaders.zip'
+          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == 'cc45cc03ffd70de91309b699b07bad1a8f236925f2f8a2dd3d0d7a67b705e5b6'
+          PY
+            python3 smo/ios/tools/prepare_runtime_shaders.py /tmp/boot-shaders.zip /tmp/smo-device-shaders --extra /tmp/boot-compute-shaders.zip
             export SMO_SHADER_IDX=/tmp/smo-device-shaders/shaders.idx
             export SMO_SHADER_DIR=/tmp/smo-device-shaders
             export SMO_SHADER_BUNDLE=/tmp/smo-device-shaders/shaders.smoa
@@ -350,7 +357,7 @@ jobs:
         # 而 check-run 的 annotations 是公开可读的，所以失败时把日志尾部发成注解（见下一步）
         run: |
           set -o pipefail
-          if [ "${SMO_INJECTED:-}" = '1' ]; then export SMO_SHADER_ARCHIVE=/tmp/boot-shaders.zip; fi
+          if [ "${SMO_INJECTED:-}" = '1' ]; then export SMO_SHADER_ARCHIVE=/tmp/boot-shaders.zip SMO_SHADER_EXTRA=/tmp/boot-compute-shaders.zip; fi
           bash smo/ios/shell_build.sh 2>&1 | tee smo/ios/out_step.log
       - name: 失败时把报错发成注解（错误行优先）
         # 注释：这是维护者/协作方在拿不到仓库管理员权限时，唯一能直接看到真实报错的通道

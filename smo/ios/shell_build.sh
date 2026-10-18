@@ -127,7 +127,9 @@ if [ -f "$EMBED_SRC" ] && [ -z "${SMO_SHADER_ARCHIVE:-}" ]; then
   echo "Embedded device packaging requires SMO_SHADER_ARCHIVE"; exit 1
 fi
 if [ -n "${SMO_SHADER_ARCHIVE:-}" ]; then
-  "$PY" "$ROOT/smo/ios/tools/prepare_runtime_shaders.py" "$SMO_SHADER_ARCHIVE" "$APP/RuntimeShaders"
+  # SMO_SHADER_EXTRA：额外合并的私有 fixture（计算着色器），空格分隔
+  # shellcheck disable=SC2086
+  "$PY" "$ROOT/smo/ios/tools/prepare_runtime_shaders.py" "$SMO_SHADER_ARCHIVE" "$APP/RuntimeShaders" ${SMO_SHADER_EXTRA:+--extra $SMO_SHADER_EXTRA}
 fi
 if [ -f "$EMBED_SRC" ]; then
   "$PY" "$ROOT/smo/ios/tools/check_device_payload.py" "$APP/SMOMobile" "$EMBED_SRC.manifest.tsv"

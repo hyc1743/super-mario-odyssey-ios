@@ -470,6 +470,10 @@ static int skip_draw(const char *what) {
 static int prepare_draw(SMOGuestEncoder *e) {
     SMORenderState *s=(SMORenderState *)e.renderState;
     if(!s.vs)return skip_draw("no matched vertex shader");
+    if(!s.fs){
+        int color=0;for(int i=0;i<s->targets.count;i++)color|=s->targets.colors[i].resource.object!=0;
+        if(color)return skip_draw("no matched fragment shader");
+    }
     int depthMode=guest_depth_mode(s);
     if(s.vs&&s.vs.depthMode!=depthMode){
         nvn_shader_ent entry=s.vs.sourceEntry;
@@ -634,6 +638,11 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
     }
     case NVN_CMD_BIND_PROGRAM:{
         READ(nvn_cmd_program,p);unsigned count=(unsigned)p.resource.words[1];if(count>6)return 0;
+        /* NVN keeps compute and graphics bindings separate: binding a compute program
+         * (stages=NVN_SHADER_STAGE_COMPUTE_BIT) leaves the current VS/FS untouched. Compute
+         * dispatch is skipped for now, so there is nothing to resolve.
+         * 真机 v0.6.15：×996 stages=32 candidates=0，每次都把图形着色器清空了。 */
+        if(!(p.stages&NVN_SHADER_STAGE_ALL_GRAPHICS_BITS)){skip_draw("compute program bind (dispatch unsupported)");return 1;}
         s->programDevice=p.resource.words[0];
         if(p.stages&1)s.vs=nil;if(p.stages&2)s.fs=nil;
         for(unsigned i=0;i<count;i++){
@@ -642,11 +651,11 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
                 NVN_LOG("NVN_SHADER_EXEC_MATCH_FAILED program=%llu index=%u stages=%llu candidates=%u matches=%u",
                     (unsigned long long)p.resource.words[15],i,(unsigned long long)p.stages,match.candidates,match.matches);
                 nvn_shader_capture_gpu(p.resource.words[2+i*2],p.resource.words[15],i);
-                /* 程序匹配不上：清空着色器，后续绘制在 prepare_draw 里逐条跳过，命令缓冲继续 */
-                s.vs=nil;s.fs=nil;return 1;
+                /* 程序匹配不上：已按 p.stages 清掉被替换的阶段，后续绘制在 prepare_draw 里逐条跳过 */
+                continue;
             }
             unsigned stage=entry->stage==1?0:entry->stage==5?1:UINT_MAX;
-            if(stage==UINT_MAX){s.vs=nil;s.fs=nil;skip_draw("geometry/tessellation/compute shader");return 1;}
+            if(stage==UINT_MAX){s.vs=nil;s.fs=nil;skip_draw("geometry/tessellation shader");return 1;}
             if(!(p.stages&(1u<<stage)))continue;
             SMOMetalShader *shader=load_shader(e,entry,guest_depth_mode(s));if(!shader)return 0;
             if(stage==0)s.vs=shader;else s.fs=shader;

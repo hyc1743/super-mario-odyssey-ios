@@ -492,6 +492,23 @@ def test_ios_runtime_shaders():
               unpacked[key + ".metal"] == source and unpacked[key + ".clip.metal"] == clip)
         check("iOS package reduces signed shader files to two", len(list((root / "RuntimeShaders").iterdir())) == 2)
         check("iOS package only copies selected flat runtime files", "../must-not-extract" not in unpacked)
+        twin = "fedcba9876543210"
+        files[twin + ".metal"] = source
+        files[twin + ".clip.metal"] = clip
+        files[twin + ".bindings.json"] = json.dumps({"version": 1, "key": twin, "stage": 1,
+                                                     "depth_clip_source": twin + ".clip.metal"}).encode()
+        manifest["shaders"].append({**manifest["shaders"][0], "key": twin})
+        files["manifest.json"] = json.dumps(manifest).encode()
+        files["shaders.idx"] = f"{key}\t1\t{key}.metal\n{key}\t1\t{twin}.metal\n".encode()
+        pack()
+        prepare(archive, root / "merged")
+        rows = [l.split("\t") for l in (root / "merged" / "shaders.idx").read_text().splitlines() if l]
+        check("iOS package merges byte-identical shader assets", {r[2] for r in rows} == {key + ".metal"})
+        manifest["shaders"].pop()
+        for suffix in (".metal", ".clip.metal", ".bindings.json"):
+            files.pop(twin + suffix)
+        files["manifest.json"] = json.dumps(manifest).encode()
+        files["shaders.idx"] = f"{key}\t1\t{key}.metal\n".encode()
         files[key + ".clip.metal"] = b"corrupt"
         pack()
         try:

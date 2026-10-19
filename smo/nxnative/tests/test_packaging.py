@@ -58,6 +58,8 @@ class PackagingTests(unittest.TestCase):
             "prod.keys": b"test",
             "renamed-framework": b"\xca\xfe\xba\xbe" + bytes(60),
             "dm/main.fixups.tsv": b"metadata",
+            "renamed-library": b"MTLB" + bytes(60),
+            "RomFS.smoa.0": b"raw-volume",
         }.items():
             with self.subTest(name=name):
                 self.assertFalse(inspect(self.ipa(extra={name: data}))["thin"])
@@ -100,6 +102,26 @@ class PackagingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "corrupt"):
             restore_resources(out / "resources-parts.json", self.root / "restored")
         self.assertFalse((self.root / "restored/resource_manifest.json").exists())
+
+    def test_restore_rejects_missing_part(self):
+        romfs, msl, expected = self.resources()
+        out = self.root / "parts"
+        _, spec = write_resources(romfs, msl, expected, out, part_bytes=100)
+        (out / spec["parts"][-1]["name"]).unlink()
+        with self.assertRaises(FileNotFoundError):
+            restore_resources(out / "resources-parts.json", self.root / "restored")
+        self.assertFalse((self.root / "restored/resource_manifest.json").exists())
+
+    def test_restore_rejects_manifest_swap(self):
+        import json
+        romfs, msl, expected = self.resources()
+        out = self.root / "parts"
+        write_resources(romfs, msl, expected, out, part_bytes=100)
+        path = out / "resources-parts.json"
+        spec = json.loads(path.read_text()); spec["resource_manifest_sha256"] = "0" * 64
+        path.write_bytes(json_bytes(spec))
+        with self.assertRaisesRegex(ValueError, "manifest checksum"):
+            restore_resources(path, self.root / "restored")
 
     def test_restore_rejects_zip_traversal(self):
         out = self.root / "parts"; out.mkdir()

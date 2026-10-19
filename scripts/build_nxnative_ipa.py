@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -179,7 +180,7 @@ def build(args):
         shutil.copytree(pristine, source, ignore=shutil.ignore_patterns(".git", "__pycache__"))
         adapt(source)
         expected = identity(source / "dm/games" / LOCK["title_id"])
-        patched, parts = None, None
+        patched, parts, shader_report = None, None, None
         upstream = None
         try:
             if args.mode == "personal":
@@ -220,6 +221,12 @@ def build(args):
                 upstream.split_shaders(sys.executable, source, [extracted / "RomFS"], [extracted / "ExeFS/main"],
                                        sh / "pkg", env, work / "logs", profile)
                 ios = upstream.build_shaders(sys.executable, source, sh, xlate, env, work / "logs", profile)
+                shader_text = (work / "logs/dmsh_build.log").read_text(encoding="utf-8", errors="replace")
+                counts = re.search(r"着色器 (\d+)：成功 (\d+)", shader_text)
+                shader_report = {"ios_libraries": len(list((ios / ("b-" + expected["shader_chain"])).glob("*_b.metallib")))}
+                if counts:
+                    total, ready = map(int, counts.groups())
+                    shader_report.update(total=total, ready=ready, failed=total - ready)
                 run([sys.executable, source / "dm/gfx/tools/c1_guard.py", sh / "cache" / ("b-" + expected["shader_chain"]),
                      profile.table("c1_full.tsv")], env=env, log=work / "logs/c1-guard.log")
                 shutil.copy2(source / "dm/gfx/tools/dmsh_chain.lock", out / "shader-toolchain.lock")
@@ -227,7 +234,8 @@ def build(args):
             name = "SMOMobile-shell.ipa" if args.mode == "shell" else "SMOMobile-1.4.1.ipa"
             report = assemble(source, work, out / name, args.mode, expected, patched=patched, resources=parts)
             summary = dict(expected, mode=args.mode, ipa=name, ipa_sha256=sha256(out / name), ipa_bytes=(out / name).stat().st_size,
-                           validation=report, resource_parts=parts, device_validation="not performed; user sideload required")
+                           validation=report, resource_parts=parts, shader_build=shader_report,
+                           device_validation="not performed; user sideload required")
             (out / "build_report.json").write_bytes(json_bytes(summary))
             (out / "thin_ipa_report.json").write_bytes(json_bytes(report))
             shutil.copy2(ROOT / "docs/README_INSTALL.md", out / "README_INSTALL.md")

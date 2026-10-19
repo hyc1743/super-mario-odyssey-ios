@@ -13,7 +13,7 @@ import struct
 import sys
 import zipfile
 
-FORBIDDEN_SUFFIXES = (".nsp", ".nca", ".tik", ".szs", ".sharc", ".sharcb", ".bfsha", ".patched.bin", ".keys")
+FORBIDDEN_SUFFIXES = (".nsp", ".xci", ".nsz", ".xcz", ".nca", ".tik", ".szs", ".sharc", ".sharcb", ".bfsha", ".patched.bin", ".keys")
 
 
 def code_sections(stream) -> list[str]:
@@ -64,6 +64,7 @@ def inspect(path: Path, policy: str = "shell") -> dict:
         for name in names:
             normalized = "/" + name.replace("\\", "/").lower()
             raw = any(normalized.endswith(s) for s in FORBIDDEN_SUFFIXES) or "/exefs/" in normalized or "/romfs/" in normalized
+            raw |= normalized.rsplit("/", 1)[-1].startswith("romfs.smoa.")
             derived = any(x in normalized for x in ("/msl/", "/runtimeshaders/", "/guest.framework/"))
             derived |= normalized.endswith((".metallib", ".metal", ".air", ".smoa", "/icon.jpg", "/control.nacp"))
             if policy == "shell":
@@ -75,7 +76,7 @@ def inspect(path: Path, policy: str = "shell") -> dict:
                 continue
             with archive.open(name) as stream:
                 prefix = stream.read(4)
-            if prefix == b"NSO0" and policy != "legacy":
+            if prefix in (b"NSO0", b"MTLB") and policy != "legacy":
                 forbidden.append(name)
             if prefix in (b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca", b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
                           b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf") and policy != "legacy":

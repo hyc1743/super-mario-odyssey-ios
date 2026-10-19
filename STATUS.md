@@ -2519,3 +2519,12 @@ RG11B10F 当深度目标 + 画颜色 → 不崩溃、颜色照画；DEPTH32F + C
    `selftest.py` 增加「c1 无常数段仍按常数处理」断言（本机 全部通过）
 4. `metal_render_selftest`：测试着色器加 support（乘 render_scale）与 c1（加零）两个实参 ——
    支撑缓冲没绑或没填 1.0 会直接黑屏，测试立刻失败
+
+### 同一轮的第三波：下一轮取证工具就位
+
+- `main.m`：Documents/SMODiagnostics 设为 SMO_SHADER_CAPTURE_DIR + SMO_FRAME_CAPTURE_DIR ——
+  下一轮导出日志时同目录带出：着色器失配样本 `shader-*.bin`（program 12697 的失配 blob 可离线
+  补进索引）、每帧画面 PPM（黑屏画面直接可见）、`NVN_METAL_DRAW_STATE`/可见性统计、
+  Metal 错误详情文件。代价：每帧一次同步回读（测试轮可接受）
+- `nvn_cmd_render`：NVN_BUFFER_BINDING 不再只记前 24 条（全被标题画面槽 0 占满），
+  每个 (kind,stage) 记第一条 + 非槽 0 绑定再记 256 条 —— 游戏世界的绑定槽空间可见

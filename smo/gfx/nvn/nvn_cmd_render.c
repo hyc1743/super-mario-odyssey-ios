@@ -90,7 +90,7 @@ static void buffers(NVNcommandBuffer *c,int kind,int stage,int first,int count,c
     for (int i=0;i<count;++i)
         if (ranges[i].size>UINT64_MAX-ranges[i].address) NVN_DIE("buffer binding overflow");
     /* 真机 v0.6.19：前 24 条全是槽 0，把标题画面后面的绑定槽全淹了 ——
-     * 改成每个 (kind,stage,first,count) 组合记一次（上限 128 组）。 */
+     * 改成每个 (kind,stage) 记第一条，非槽 0 的绑定再记 256 条。 */
     static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
     static unsigned seen[32];
     unsigned bit=1u<<kind;

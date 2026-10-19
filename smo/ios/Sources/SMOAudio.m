@@ -12,6 +12,11 @@ static _Atomic int accepting,flush;
 enum { PRIME_FRAMES=1440 };
 static int primed;
 static _Atomic uint64_t callbacks,played;
+static uint64_t queued_frames(void){
+    uint64_t w=atomic_load_explicit(&ring.write,memory_order_acquire);
+    uint64_t r=atomic_load_explicit(&ring.read,memory_order_relaxed);
+    return w>=r?w-r:0;
+}
 static void enqueue(const int16_t *pcm,size_t frames){
     if(atomic_load_explicit(&accepting,memory_order_acquire))smo_audio_ring_push(&ring,pcm,frames);
 }
@@ -51,9 +56,10 @@ static OSStatus render(void *context,AudioUnitRenderActionFlags *flags,
     [nc addObserver:self selector:@selector(reset:) name:AVAudioSessionMediaServicesWereResetNotification object:nil];
     [self resume];
     [NSTimer scheduledTimerWithTimeInterval:10 repeats:YES block:^(NSTimer *timer){
-        (void)timer;dm_log_emit("AUDIO_SPEAKER callbacks=%llu played=%llu underrun=%llu dropped=%llu running=%d",
+        (void)timer;dm_log_emit("AUDIO_SPEAKER callbacks=%llu played=%llu underrun=%llu dropped=%llu queued=%llu running=%d",
             (unsigned long long)atomic_load(&callbacks),(unsigned long long)atomic_load(&played),
-            (unsigned long long)atomic_load(&ring.underrun),(unsigned long long)atomic_load(&ring.dropped),self->_running);
+            (unsigned long long)atomic_load(&ring.underrun),(unsigned long long)atomic_load(&ring.dropped),
+            (unsigned long long)queued_frames(),self->_running);
     }];
 }
 - (BOOL)createUnit {
@@ -74,34 +80,40 @@ static OSStatus render(void *context,AudioUnitRenderActionFlags *flags,
 - (void)resume {
     if(_running || _interrupted || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
     AVAudioSession *session=AVAudioSession.sharedInstance;NSError *error=nil;
-    if(![session setCategory:AVAudioSessionCategoryPlayback error:&error] || ![session setActive:YES error:&error]){
+    if(![session setCategory:AVAudioSessionCategoryPlayback error:&error] ||
+       ![session setPreferredSampleRate:48000 error:&error] ||
+       ![session setPreferredIOBufferDuration:0.01 error:&error] ||
+       ![session setActive:YES error:&error]){
         dm_log_emit("AUDIO_SESSION_FAILED code=%ld",(long)error.code);return;
     }
-    [session setPreferredSampleRate:48000 error:nil];
-    [session setPreferredIOBufferDuration:0.01 error:nil];
     if(!_unit && ![self createUnit])return;
     atomic_store(&flush,1);
     OSStatus result=AudioOutputUnitStart(_unit);
     _running=result==noErr;atomic_store_explicit(&accepting,_running,memory_order_release);
-    dm_log_emit("AUDIO_SPEAKER_START status=%d rate=48000 channels=2",(int)result);
+    dm_log_emit("AUDIO_SPEAKER_START status=%d rate=48000 channels=2 queued=%llu",(int)result,
+                (unsigned long long)queued_frames());
 }
 - (void)suspend {
     atomic_store_explicit(&accepting,0,memory_order_release);
     if(_unit && _running)AudioOutputUnitStop(_unit);_running=NO;
     [AVAudioSession.sharedInstance setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
+    dm_log_emit("AUDIO_SPEAKER_SUSPEND queued=%llu",(unsigned long long)queued_frames());
 }
 - (void)lifecycle:(NSNotification *)note {
     BOOL active=[note.name isEqualToString:UIApplicationDidBecomeActiveNotification];
-    smo_audio_set_suspended(!active);if(active)[self resume];else [self suspend];
+    smo_audio_set_suspended(!active);dm_log_emit("AUDIO_SPEAKER_LIFECYCLE active=%d",active);
+    if(active)[self resume];else [self suspend];
 }
 - (void)interruption:(NSNotification *)note {
     dispatch_async(dispatch_get_main_queue(),^{
         self->_interrupted=[note.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue]==AVAudioSessionInterruptionTypeBegan;
+        dm_log_emit("AUDIO_SPEAKER_INTERRUPTION began=%d",self->_interrupted);
         if(self->_interrupted)[self suspend];else [self resume];
     });
 }
 - (void)reset:(NSNotification *)note {
     (void)note;dispatch_async(dispatch_get_main_queue(),^{
+        dm_log_emit("AUDIO_SPEAKER_MEDIA_RESET");
         [self suspend];if(self->_unit)AudioComponentInstanceDispose(self->_unit);self->_unit=NULL;[self resume];
     });
 }

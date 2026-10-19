@@ -10,6 +10,23 @@
 #include "nvn_host.h"
 #include <math.h>
 #include <limits.h>
+#include <stdatomic.h>
+
+static _Atomic uint64_t metal_shader_cache_hits;
+static _Atomic uint64_t metal_shader_cache_misses;
+static _Atomic uint64_t metal_pipeline_cache_hits;
+static _Atomic uint64_t metal_pipeline_cache_misses;
+
+static void log_cache_stats_if_due(void) {
+    uint64_t total=atomic_load(&metal_shader_cache_hits)+atomic_load(&metal_shader_cache_misses)+
+                   atomic_load(&metal_pipeline_cache_hits)+atomic_load(&metal_pipeline_cache_misses);
+    if(total && (total==1 || total%120==0))
+        NVN_LOG("NVN_METAL_CACHE shader_hit=%llu shader_miss=%llu pipeline_hit=%llu pipeline_miss=%llu",
+            (unsigned long long)atomic_load(&metal_shader_cache_hits),
+            (unsigned long long)atomic_load(&metal_shader_cache_misses),
+            (unsigned long long)atomic_load(&metal_pipeline_cache_hits),
+            (unsigned long long)atomic_load(&metal_pipeline_cache_misses));
+}
 
 @interface SMOMetalShader : NSObject
 @property(nonatomic,strong) id<MTLFunction> function;
@@ -214,7 +231,9 @@ static SMOMetalShader *load_shader(SMOGuestEncoder *e,const nvn_shader_ent *entr
     if(entry->stage!=1)depthMode=1;  /* depth variants exist only for vertex shaders */
     if(depthMode!=0&&depthMode!=1){reject("device depth mode");return nil;}
     NSString *cacheKey=[NSString stringWithFormat:@"%@:%d",key,depthMode];
-    SMOMetalShader *cached=s.shaders[cacheKey];if(cached)return cached;
+    SMOMetalShader *cached=s.shaders[cacheKey];
+    if(cached){atomic_fetch_add(&metal_shader_cache_hits,1);log_cache_stats_if_due();return cached;}
+    atomic_fetch_add(&metal_shader_cache_misses,1);log_cache_stats_if_due();
     const char *directory=getenv("SMO_SHADER_DIR");
     if(!directory){reject("SMO_SHADER_DIR missing");return nil;}
     NSString *root=[NSString stringWithUTF8String:directory];
@@ -474,7 +493,9 @@ static id<MTLRenderPipelineState> pipeline_for(SMOGuestEncoder *e,MTLRenderPassD
         [key appendFormat:@":v%u:%u:%u:%u:%u:%u",location,(unsigned)a.fmt,(unsigned)a.offset,(unsigned)a.stream,stream.stride,stream.divisor];
     }
     d.vertexDescriptor=vd;
-    id<MTLRenderPipelineState> cached=s.pipelines[key];if(cached)return cached;
+    id<MTLRenderPipelineState> cached=s.pipelines[key];
+    if(cached){atomic_fetch_add(&metal_pipeline_cache_hits,1);log_cache_stats_if_due();return cached;}
+    atomic_fetch_add(&metal_pipeline_cache_misses,1);log_cache_stats_if_due();
     NSError *error=nil;cached=[e.device newRenderPipelineStateWithDescriptor:d error:&error];
     if(!cached){
         NVN_LOG("NVN_METAL_PIPELINE_FAILED domain=%s code=%ld",error.domain.UTF8String ?: "unknown",(long)error.code);

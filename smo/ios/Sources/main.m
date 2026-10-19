@@ -345,6 +345,7 @@ static NSString *ScanDocuments(void) {
 @implementation SMOViewController {
     SMOTouchController *_touchController;
     UIButton *_powerMode;
+    UIButton *_layoutMode;
     SMOMetalView *_gameView;
     UIStackView *_statusColumn;
     UIButton *_displayLogs;
@@ -457,10 +458,16 @@ static UILabel *MakeLabel(CGFloat size, UIFontWeight w, UIColor *c) {
     _powerMode.backgroundColor=[UIColor colorWithWhite:0 alpha:0.65];_powerMode.layer.cornerRadius=8;
     _powerMode.hidden=YES;_powerMode.translatesAutoresizingMaskIntoConstraints=NO;
     [_powerMode addTarget:self action:@selector(togglePowerMode) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:_powerMode];
+    _layoutMode=[UIButton buttonWithType:UIButtonTypeSystem];
+    [_layoutMode setTitle:_touchController.isThreeDLayout?@"3D":@"2D" forState:UIControlStateNormal];
+    [_layoutMode setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    _layoutMode.backgroundColor=[UIColor colorWithWhite:0 alpha:0.65];_layoutMode.layer.cornerRadius=8;
+    _layoutMode.hidden=YES;_layoutMode.translatesAutoresizingMaskIntoConstraints=NO;
+    [_layoutMode addTarget:self action:@selector(toggleTouchLayout) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:_layoutMode];
     __weak SMOViewController *displayController=self;
     _gameView.onFirstFrame=^{
         SMOViewController *controller=displayController;
-        if(controller){controller->_statusColumn.hidden=YES;controller->_displayLogs.hidden=NO;controller->_touchController.hidden=NO;controller->_powerMode.hidden=NO;}
+        if(controller){controller->_statusColumn.hidden=YES;controller->_displayLogs.hidden=NO;controller->_touchController.hidden=controller->_touchController.hasExternalController;controller->_powerMode.hidden=NO;controller->_layoutMode.hidden=NO;}
     };
 
     UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
@@ -469,6 +476,10 @@ static UILabel *MakeLabel(CGFloat size, UIFontWeight w, UIColor *c) {
         [_powerMode.topAnchor constraintEqualToAnchor:safe.topAnchor constant:8],
         [_powerMode.widthAnchor constraintEqualToConstant:100],
         [_powerMode.heightAnchor constraintEqualToConstant:36],
+        [_layoutMode.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:12],
+        [_layoutMode.topAnchor constraintEqualToAnchor:safe.topAnchor constant:8],
+        [_layoutMode.widthAnchor constraintEqualToConstant:64],
+        [_layoutMode.heightAnchor constraintEqualToConstant:36],
         [_displayLogs.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-12],
         [_displayLogs.topAnchor constraintEqualToAnchor:safe.topAnchor constant:8],
         [_displayLogs.widthAnchor constraintEqualToConstant:64],
@@ -502,10 +513,17 @@ static UILabel *MakeLabel(CGFloat size, UIFontWeight w, UIColor *c) {
     [_more setTitle:_showAll ? @"只看最近" : @"显示全部" forState:UIControlStateNormal];
     [self refresh];
 }
-- (void)toggleDisplayLogs { _statusColumn.hidden=!_statusColumn.hidden;_touchController.hidden=!_statusColumn.hidden; }
+- (void)toggleDisplayLogs {
+    _statusColumn.hidden=!_statusColumn.hidden;
+    _touchController.hidden=!_statusColumn.hidden || _touchController.hasExternalController;
+}
 - (void)togglePowerMode {
     SMOFramePacer *pacer=SMOFramePacer.shared;pacer.powerSaving=!pacer.powerSaving;
     [_powerMode setTitle:pacer.powerSaving?@"省电 30 帧":@"60 帧" forState:UIControlStateNormal];
+}
+- (void)toggleTouchLayout {
+    [_touchController toggleLayout];
+    [_layoutMode setTitle:_touchController.isThreeDLayout?@"3D":@"2D" forState:UIControlStateNormal];
 }
 
 static NSString *FmtDuration(double s) {

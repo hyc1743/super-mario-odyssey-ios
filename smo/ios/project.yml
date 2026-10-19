@@ -5,7 +5,7 @@ name: SMOMobile
 options:
   bundleIdPrefix: com.example
   deploymentTarget:
-    iOS: "16.0"          # 保守值：只要 CI runner 的 Xcode 不比这更老就行；以后接图形层需要 iOS 26 再抬
+    iOS: "26.0"          # Guest.framework?BC ????????? iOS/iPadOS 26+
   createIntermediateGroups: true
 
 settings:
@@ -29,6 +29,7 @@ targets:
     dependencies:
       - sdk: AudioToolbox.framework
       - sdk: AVFAudio.framework
+      - sdk: GameController.framework
     sources:
       - path: Sources
       - path: Resources

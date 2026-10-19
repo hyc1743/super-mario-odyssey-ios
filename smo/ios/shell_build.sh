@@ -63,6 +63,16 @@ rm -rf Gen "$OUT"
 mkdir -p Gen "$OUT"
 "$PY" "$ROOT/smo/tools/prepare_shared_fonts.py" "$ROOT/smo/ios/Resources/SharedFonts"
 
+# Optional resource gate used by the thin-IPA entry point.
+# The validator only reads existing ExeFS/RomFS and writes a small report.
+if [ -n "${SMO_RESOURCE_ROOT:-}" ]; then
+  echo "== 检查外置游戏资源（不复制进 IPA） =="
+  "$PY" "$ROOT/smo/tools/build_ipa.py" \
+    --resources "$SMO_RESOURCE_ROOT" \
+    --output "$OUT" \
+    --report "$OUT/build_report.json"
+fi
+
 # 在当前目录生成工程（**不是** Gen/）：xcodegen 把 --project 指定的目录当作相对基准，
 # 若生成到 Gen/，project.yml 里的 info.path(Sources/Resources) 都会被拼成 Gen/Gen/Info.plist、
 # Gen/Sources 之类 —— CI 上就是这么报的：Build input file cannot be found: .../Gen/Gen/Info.plist
@@ -147,7 +157,5 @@ echo "== 产物 =="
 ls -la "$OUT"
 echo "== 检查：壳里不许有任何游戏内容 =="
 # 与参考项目 shell_build.sh 末尾同样的自我检查：壳只该有自己的代码、图标与几张小表。
-if unzip -l "$OUT/SMOMobile-shell.ipa" | grep -qE '\.(nsp|nca|sharc|sharcb|bfsha|szs|tik)$|RomFS|ExeFS'; then
-  echo "🔴 壳里出现了游戏内容文件名，中止"; exit 1
-fi
-echo "通过：壳里只有兼容层自己的东西"
+"$PY" "$ROOT/smo/verify/check_thin_ipa.py" "$OUT/SMOMobile-shell.ipa" --json "$OUT/thin_ipa_report.json"
+echo "thin IPA check passed"

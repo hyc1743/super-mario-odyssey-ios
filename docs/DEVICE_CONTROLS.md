@@ -18,7 +18,7 @@
 
 ## 音频检查
 
-iOS 使用 48 kHz 立体声扬声器输出。`AUDIO_RENDERER_MIX_FRAMES` 应持续增加，`AUDIO_DEVICE_PCM` 的 `frames` 记录混音器产生的设备帧数，`audible` / `peak` 表示样本是否包含非零信号；`AUDIO_SPEAKER` 的 `callbacks` / `played` 则表示 RemoteIO 是否持续取走音频队列。启动自检还会要求持续混音，单帧静音不再算通过。
+iOS 使用 48 kHz 立体声扬声器输出。`AUDIO_RENDERER_MIX_FRAMES` 应持续增加，`AUDIO_DEVICE_PCM` 的 `frames` 记录混音器产生的设备帧数，`audible` / `peak` 表示样本是否包含非零信号；`AUDIO_SPEAKER` 的 `callbacks` / `played` / `queued` 则表示 RemoteIO 是否持续取走音频队列。`AUDIO_SPEAKER_LIFECYCLE`、`AUDIO_SPEAKER_INTERRUPTION` 和 `AUDIO_SPEAKER_MEDIA_RESET` 用于区分前后台切换、系统中断和音频服务重置。启动自检还会要求持续混音，单帧静音不再算通过。
 
 真机验证时先确认铃声/媒体音量正常，再进入游戏并操作一段时间；随后切到后台、恢复前台并再次播放。若没有声音，请导出日志，重点保留上述三类音频记录及其前后时间戳。启动自检能证明 PCM 持续生成，最终扬声器听感仍需真机确认。
 

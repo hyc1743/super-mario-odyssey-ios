@@ -35,7 +35,12 @@ jobs:
       - name: 装依赖
         run: pip install -r requirements.txt
       - name: 自检（Yaz0 / SARC / NSO 头 / 改写器端到端）
-        run: python3 smo/tools/selftest.py
+        run: |
+          python3 smo/tools/selftest.py
+          python3 smo/tools/build_ipa_selftest.py
+          python3 smo/verify/check_thin_ipa_selftest.py
+          python3 smo/ios/tools/package_installable_selftest.py
+          python3 smo/ios/tools/check_ios_contract.py
       - name: 造合成改写产物（装载器自检用；真产物是游戏内容，不能进 CI）
         run: python3 smo/tools/make_synthetic_artifacts.py work/synthetic
       - name: 编宿主里平台无关的那部分（含自动生成的接管表）
@@ -332,13 +337,13 @@ jobs:
       - name: Check iOS presentation sources
         if: ${{ always() }}
         run: |
-          xcrun -sdk iphoneos clang -fsyntax-only -fobjc-arc -target arm64-apple-ios16.0 \
+          xcrun -sdk iphoneos clang -fsyntax-only -fobjc-arc -target arm64-apple-ios26.0 \
             -Ismo/host -Ismo/gfx/nvn smo/ios/Sources/SMOMetalView.m smo/ios/Sources/SMOTouchController.m \
             smo/ios/Sources/SMOAudio.m smo/ios/Sources/SMOFramePacer.m smo/ios/Sources/main.m
       - name: iOS frontend source check
         if: ${{ always() }}
         run: |
-          xcrun -sdk iphoneos clang -fsyntax-only -fobjc-arc -target arm64-apple-ios16.0 \
+          xcrun -sdk iphoneos clang -fsyntax-only -fobjc-arc -target arm64-apple-ios26.0 \
             -Ismo/host -Ismo/gfx/nvn smo/ios/Sources/SMOMetalView.m smo/ios/Sources/SMOTouchController.m \
             smo/ios/Sources/SMOAudio.m smo/ios/Sources/SMOFramePacer.m smo/ios/Sources/main.m
       - name: Automatically validate captured game output before device packaging
@@ -360,6 +365,15 @@ jobs:
           set -o pipefail
           if [ "${SMO_INJECTED:-}" = '1' ]; then export SMO_SHADER_ARCHIVE=/tmp/boot-shaders.zip SMO_SHADER_EXTRA=/tmp/boot-compute-shaders.zip; fi
           bash smo/ios/shell_build.sh 2>&1 | tee smo/ios/out_step.log
+      - name: 上传薄 IPA 构建报告
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: SMOMobile-build-report
+          path: |
+            smo/ios/out/build_report.json
+            smo/ios/out/thin_ipa_report.json
+          if-no-files-found: warn
       - name: 失败时把报错发成注解（错误行优先）
         # 注释：这是维护者/协作方在拿不到仓库管理员权限时，唯一能直接看到真实报错的通道
         if: failure()

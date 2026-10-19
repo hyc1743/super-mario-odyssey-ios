@@ -1,7 +1,7 @@
 name: SMOFrontendTests
 options:
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "26.0"
 settings:
   base:
     CODE_SIGNING_ALLOWED: "NO"

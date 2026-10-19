@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 import sys
+import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "smo/nxnative"))
 from package import restore_resources
@@ -15,7 +16,7 @@ def main():
     args = parser.parse_args()
     try:
         manifest = restore_resources(args.parts, args.destination)
-    except (OSError, ValueError, KeyError) as error:
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
         parser.exit(1, f"Restore failed: {error}\n")
     print(f"Verified {len(manifest['files'])} files. Copy the contents of {args.destination} to the app's Documents.")
 

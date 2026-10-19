@@ -56,6 +56,8 @@ class PackagingTests(unittest.TestCase):
             "RuntimeShaders/shaders.smoa": b"shader",
             "folder/archive.szs": b"raw",
             "prod.keys": b"test",
+            "renamed-framework": b"\xca\xfe\xba\xbe" + bytes(60),
+            "dm/main.fixups.tsv": b"metadata",
         }.items():
             with self.subTest(name=name):
                 self.assertFalse(inspect(self.ipa(extra={name: data}))["thin"])

@@ -105,11 +105,15 @@ class GitHub:
         existing = self.assets(release).get(name)
         if existing:
             if not replace:
-                if existing["size"] != size:
+                if existing.get("state") != "uploaded":
+                    self.api("DELETE", f"/releases/assets/{existing['id']}")
+                elif existing["size"] != size:
                     raise ValueError("Existing release asset size mismatch: " + name)
-                print("Reusing private asset: " + name, flush=True)
-                return
-            self.api("DELETE", f"/releases/assets/{existing['id']}")
+                else:
+                    print("Reusing private asset: " + name, flush=True)
+                    return
+            else:
+                self.api("DELETE", f"/releases/assets/{existing['id']}")
         url = release["upload_url"].split("{", 1)[0] + "?name=" + urllib.parse.quote(name)
         reader = RangeReader(path, start, size) if path else io.BytesIO(data)
         try:

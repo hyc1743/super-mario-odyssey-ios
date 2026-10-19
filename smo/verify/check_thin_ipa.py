@@ -65,7 +65,10 @@ def inspect(path: Path, policy: str = "shell") -> dict:
             normalized = "/" + name.replace("\\", "/").lower()
             raw = any(normalized.endswith(s) for s in FORBIDDEN_SUFFIXES) or "/exefs/" in normalized or "/romfs/" in normalized
             derived = any(x in normalized for x in ("/msl/", "/runtimeshaders/", "/guest.framework/"))
-            derived |= normalized.endswith(("_b.metallib", "_bf.metallib", "/icon.jpg", "/control.nacp"))
+            derived |= normalized.endswith((".metallib", ".metal", ".air", ".smoa", "/icon.jpg", "/control.nacp"))
+            if policy == "shell":
+                derived |= normalized.endswith((".fixups.tsv", ".gates.tsv", ".params.tsv", ".cuts.tsv", ".obs.tsv"))
+                derived |= normalized.endswith(("/shader_map.tsv", "/pso_manifest.tsv", "/c1_full.tsv"))
             if raw or (policy != "legacy" and derived and not name.endswith("/")):
                 forbidden.append(name)
             if name.endswith("/"):
@@ -74,6 +77,9 @@ def inspect(path: Path, policy: str = "shell") -> dict:
                 prefix = stream.read(4)
             if prefix == b"NSO0" and policy != "legacy":
                 forbidden.append(name)
+            if prefix in (b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca", b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
+                          b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf") and policy != "legacy":
+                errors.append("Unexpected non-arm64 or universal executable: " + name)
             if prefix == b"\xcf\xfa\xed\xfe" and policy != "legacy":
                 with archive.open(name) as stream:
                     sections = code_sections(stream)

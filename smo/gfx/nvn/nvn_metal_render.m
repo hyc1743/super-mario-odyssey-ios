@@ -395,7 +395,7 @@ static int scissored_clear(SMOGuestEncoder *e,MTLRenderPassDescriptor *pass,id<M
 }
 /* 之前管线早退全部静默 → 真机日志只有 235 条「render pipeline」不知道原因。
  * 每个原因记一次（限条数），下一轮日志直接给出黑色画面的出处。 */
-static int pipeline_skip(NSString *reason) {
+static id pipeline_skip(NSString *reason) {
     static NSMutableSet<NSString *> *seen;
     @synchronized([SMORenderState class]){
         if(!seen)seen=[NSMutableSet new];
@@ -404,7 +404,7 @@ static int pipeline_skip(NSString *reason) {
             NVN_LOG("NVN_METAL_PIPELINE_SKIP %s",reason.UTF8String);
         }
     }
-    return 0;
+    return nil;
 }
 static id<MTLRenderPipelineState> pipeline_for(SMOGuestEncoder *e,MTLRenderPassDescriptor *pass) {
     SMORenderState *s=(SMORenderState *)e.renderState;

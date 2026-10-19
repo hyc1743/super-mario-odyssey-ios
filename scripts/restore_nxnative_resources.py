@@ -10,7 +10,7 @@ from package import restore_resources
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("parts", type=Path, help="resources-parts.json from the private build")
+    parser.add_argument("parts", type=Path, help="resources-parts.json from the personal delivery")
     parser.add_argument("destination", type=Path, help="folder whose contents will be copied to Documents")
     args = parser.parse_args()
     try:

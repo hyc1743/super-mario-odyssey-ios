@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a public nxnative shell or a private 1.4.1 IPA with external data.
+"""Build a nxnative shell or personal 1.4.1 IPA with external game data.
 
 Run on macOS with Xcode 26+, XcodeGen and Python. Personal builds additionally
 need .NET 10, zstd, spirv-cross, lz4, capstone and fonttools. Neither mode signs

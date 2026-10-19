@@ -157,13 +157,18 @@ static MTLRenderPassDescriptor *pass_for(SMOGuestEncoder *e) {
     MTLRenderPassDescriptor *p=[MTLRenderPassDescriptor renderPassDescriptor];
     unsigned active=0;
     for(int i=0;i<s->targets.count;i++)if(s->targets.colors[i].resource.object){
-        id<MTLTexture> t=attachment_texture(e,&s->targets.colors[i]);if(!t)return nil;
-        if(t.arrayLength!=1 || t.textureType==MTLTextureTypeCube)return nil;
+        id<MTLTexture> t=attachment_texture(e,&s->targets.colors[i]);
+        if(!t){ NVN_LOG("NVN_METAL_ATTACHMENT_MISSING kind=color index=%d",i); return nil; }
+        if(t.arrayLength!=1 || t.textureType==MTLTextureTypeCube){
+            NVN_LOG("NVN_METAL_ATTACHMENT_SHAPE kind=color index=%d type=%lu layers=%lu",i,(unsigned long)t.textureType,(unsigned long)t.arrayLength); return nil;
+        }
         p.colorAttachments[i].texture=t;p.colorAttachments[i].loadAction=MTLLoadActionLoad;
         p.colorAttachments[i].storeAction=MTLStoreActionStore;active++;
     }
     if(s->targets.depth.resource.object){
-        id<MTLTexture> t=attachment_texture(e,&s->targets.depth);if(!t || t.arrayLength!=1)return nil;
+        id<MTLTexture> t=attachment_texture(e,&s->targets.depth);
+        if(!t){ NVN_LOG("NVN_METAL_ATTACHMENT_MISSING kind=depth"); return nil; }
+        if(t.arrayLength!=1){ NVN_LOG("NVN_METAL_ATTACHMENT_SHAPE kind=depth layers=%lu",(unsigned long)t.arrayLength); return nil; }
         MTLPixelFormat f=t.pixelFormat;
         /* 真机 v0.6.19：游戏把一个 RG11B10Float 贴图当深度目标绑定。以前任何非 Stencil8
          * 格式都进 depthAttachment → Metal 校验断言「not depth renderable」→ SIGABRT。
@@ -439,8 +444,9 @@ static id pipeline_skip(NSString *reason) {
 }
 static id<MTLRenderPipelineState> pipeline_for(SMOGuestEncoder *e,MTLRenderPassDescriptor *pass) {
     SMORenderState *s=(SMORenderState *)e.renderState;
-    if(!s.vs)return nil;
-    if(s->color.logic_op!=NVN_LOGIC_OP_COPY || s->color.alpha_func!=NVN_ALPHA_FUNC_ALWAYS){reject("logic/alpha test");return nil;}
+    if(!s.vs)return pipeline_skip(@"no vertex shader");
+    if(!s.fs && pass.colorAttachments[0].texture)return pipeline_skip(@"no fragment shader for color pass");
+    if(s->color.logic_op!=NVN_LOGIC_OP_COPY || s->color.alpha_func!=NVN_ALPHA_FUNC_ALWAYS)return pipeline_skip(@"logic/alpha test");
     MTLRenderPipelineDescriptor *d=[MTLRenderPipelineDescriptor new];d.vertexFunction=s.vs.function;d.fragmentFunction=s.fs.function;
     NSMutableString *key=[NSMutableString stringWithFormat:@"%@:%@",s.vs.cacheKey,s.fs.cacheKey ?: @"depth"];
     NSUInteger samples=0;

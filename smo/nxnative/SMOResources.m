@@ -32,6 +32,15 @@ NSString *SMOCheckResources(NSString *documents, NSDictionary *expected, NSStrin
     if (!raw) return @"Missing resource_manifest.json. Copy romfs/, msl/ and resource_manifest.json into this app in Files, then tap Check again.";
     NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:raw options:0 error:nil];
     if (![manifest isKindOfClass:NSDictionary.class]) return @"resource_manifest.json is invalid. Restore the resource package again.";
+    // The public shell carries no compiled game library, so it validates the
+    // manifest's chain. A personal IPA always enforces its compiled chain.
+    if ([expected[@"package_kind"] isEqual:@"shell"]) {
+        NSString *chain = manifest[@"shader_chain"];
+        NSCharacterSet *invalid = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdef"] invertedSet];
+        if (![chain isKindOfClass:NSString.class] || chain.length != 12 || [chain rangeOfCharacterFromSet:invalid].location != NSNotFound)
+            return @"The resource manifest's shader chain is invalid.";
+        NSMutableDictionary *checked = [expected mutableCopy]; checked[@"shader_chain"] = chain; expected = checked;
+    }
     for (NSString *key in @[@"format", @"title_id", @"game_version", @"nxnative_commit", @"shader_chain", @"build_ids"]) {
         if (!expected[key] || ![manifest[key] isEqual:expected[key]])
             return [NSString stringWithFormat:@"Resource version mismatch (%@). Use this build's merged 1.4.1 resources and shaders.", key];

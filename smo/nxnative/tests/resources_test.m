@@ -13,12 +13,12 @@ int main(void) {
         NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
         NSFileManager *fm = NSFileManager.defaultManager;
         NSDictionary *expected = @{@"format": @1, @"title_id": @"0100000000010000", @"game_version": @"1.4.1",
-            @"nxnative_commit": @"test", @"shader_chain": @"test", @"build_ids": @{@"main": @"test"}};
+            @"nxnative_commit": @"test", @"shader_chain": @"0123456789ab", @"build_ids": @{@"main": @"test"}};
         [fm createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil];
         NSCAssert(SMOCheckResources(root, expected, nil, nil) != nil, @"Missing manifest must fail");
         NSMutableArray *files = [NSMutableArray new];
         NSData *data = [@"verified" dataUsingEncoding:NSUTF8StringEncoding];
-        for (NSString *name in @[@"romfs/SoundData/SeResourceStd2nd.aras", @"msl/b-test/shader_b.metallib"]) {
+        for (NSString *name in @[@"romfs/SoundData/SeResourceStd2nd.aras", @"msl/b-0123456789ab/shader_b.metallib"]) {
             NSString *path = [root stringByAppendingPathComponent:name];
             [fm createDirectoryAtPath:path.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
             [data writeToFile:path atomically:YES];
@@ -32,9 +32,11 @@ int main(void) {
         NSCAssert(SMOCheckResources(root, wrong, nil, nil) != nil, @"Wrong version must fail");
         wrong = [expected mutableCopy]; wrong[@"shader_chain"] = @"old";
         NSCAssert(SMOCheckResources(root, wrong, nil, nil) != nil, @"Wrong shader chain must fail");
+        NSMutableDictionary *shell = [wrong mutableCopy]; shell[@"package_kind"] = @"shell";
+        NSCAssert(SMOCheckResources(root, shell, nil, nil) == nil, @"Shell can inspect the private build's declared chain");
         wrong = [expected mutableCopy]; wrong[@"resource_manifest_sha256"] = @"wrong";
         NSCAssert(SMOCheckResources(root, wrong, nil, nil) != nil, @"Mismatched personal package must fail");
-        NSString *shader = [root stringByAppendingPathComponent:@"msl/b-test/shader_b.metallib"];
+        NSString *shader = [root stringByAppendingPathComponent:@"msl/b-0123456789ab/shader_b.metallib"];
         [[@"corrupt!" dataUsingEncoding:NSUTF8StringEncoding] writeToFile:shader atomically:YES];
         NSCAssert(SMOCheckResources(root, expected, nil, nil) != nil, @"Same-size corruption must fail");
         [fm removeItemAtPath:shader error:nil];

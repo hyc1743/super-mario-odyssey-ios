@@ -190,7 +190,7 @@ def build(args):
                 profile = game.load(LOCK["title_id"])
                 env = dict(os.environ, GAME=LOCK["title_id"], DM_GAME=LOCK["title_id"],
                            DM_GAMES_DIR=str(source / "dm/games"), DM_ROOT=str(work), WORK=str(work / "tmp"),
-                           J=os.environ.get("J", "3"))
+                           J=os.environ.get("J", "8"))
                 env["PATH"] = os.pathsep.join(upstream.TOOL_PATHS + [env.get("PATH", "")])
                 (work / "tmp").mkdir(exist_ok=True)
                 xlate = source / "dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate"

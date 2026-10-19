@@ -4,7 +4,9 @@
 直接在手机上执行，不模拟 CPU；只把「在苹果内核上不能原样执行的少量指令」改写掉，再自己实现它依赖的
 Switch 系统服务与图形接口。**自带游戏文件（bring your own game files）** —— 本仓库不含任何游戏内容。
 
-技术路径完全照搬 [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile)（MIT）。
+新的 IPA 构建使用固定版本的 [seedds/nxnative](https://github.com/seedds/nxnative)（MIT），
+支持本体叠加 1.4.1 升级档；RomFS 和编译后着色器由用户复制到应用 Documents。
+旧版兼容层源自 [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile)（MIT），保留作历史开发记录。
 协议：MIT · 主语言：中文 · English: [README.en.md](README.en.md)
 
 > ## ⚠️ 现在的状态：启动页已验证，完整游戏仍在验证
@@ -107,38 +109,17 @@ flowchart LR
 
 ## 构建
 
-### 路线 A：在 GitHub 上出包（推荐，不需要 Mac）
+统一入口为 `python scripts/build_nxnative_ipa.py --mode shell|personal`。
+GitHub Actions 的 `build nxnative ipa` 使用 macOS/Xcode 构建，Windows 用户无需本地 Mac。
 
-[`.github/workflows/build-shell-ipa.yml`](.github/workflows/build-shell-ipa.yml) 会在 GitHub 的
-macOS runner 上（自带 Xcode）构建 App 壳并产出**未签名 IPA**，作为 artifact 与 Release 附件。
-你只需要：
+- 提交、PR 和默认手动构建只生成 **SMOMobile-shell.ipa**，完全不含游戏内容。
+- 手动选择 `personal`，使用私有输入中的本体 NSP、1.4.1 升级 NSP 和 Actions Secret `SMO_PROD_KEYS`。
+- **SMOMobile-1.4.1.ipa** 包含用户自己的游戏程序及加载表，仅上传私有构建仓库；RomFS 和游戏着色器单独输出。
 
-1. fork 或新建仓库，把本仓库推上去；
-2. Actions 页面手动触发 `build shell ipa`，或推一个 tag（`v*`）自动出 Release；
-3. 下载 `SMOMobile-shell.ipa`，用 Sideloadly / AltStore 之类工具**用你自己的 Apple ID 签名**后装到 iPhone。
-
-免费 Apple ID 也能签：签名 7 天过期（到期重签重装即可，存档不丢），最多 3 台设备、每台 3 个 App。
-
-### 路线 B：本机构建 iOS 包
-
-需要有 Apple 芯片的 Mac 与 Xcode（`xcodebuild`）。云端路线就是这条路线的自动化版本。
-
-### 路线 C：不需要 Xcode 的出包（把内容塞进壳里）
-
-跟参考项目一样：云端只出**不含任何游戏内容的空壳**，你在自己机器上把游戏文件塞进去：
-
-```
-python3 smo/tools/smom_pack.py <壳.ipa> <你的游戏文件目录> <输出.ipa>     # （工具待建）
-```
-
-### 准备游戏文件
-
-只能从你自己买的 Switch 版导出（见 [docs/GAME_FILES.md](docs/GAME_FILES.md)）。需要：
-
-- Program NCA 里的 **ExeFS**（`main` / `sdk` / `subsdk0` / `rtld` / `main.npdm`）
-- 同一 NCA 里的 **RomFS**
-
-`prod.keys` 用于解密你自己导出的包。
+安装个人 IPA 后，将资源包还原得到的 `romfs/`、`msl/` 和 `resource_manifest.json`
+复制进「文件 → 我的 iPhone → SMO Mobile」。纯壳只能检查资源；运行游戏需要个人 IPA。
+构建配置、资源分片还原和本地命令见 [安装说明](docs/README_INSTALL.md)。
+新的 nxnative 路径与下面记录的旧版运行时进度分开验收，真机结果以对应构建报告和日志为准。
 
 ## 支持哪些设备
 

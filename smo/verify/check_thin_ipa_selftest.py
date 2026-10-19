@@ -11,7 +11,7 @@ def main() -> int:
         with zipfile.ZipFile(good, "w") as archive:
             archive.writestr("Payload/SMOMobile.app/Info.plist", b"plist")
             archive.writestr("Payload/SMOMobile.app/RuntimeShaders/shaders.smoa", b"shader")
-        report = inspect(good)
+        report = inspect(good, policy="legacy")
         assert report["thin"] and report["runtime_shader_entries"] == 1
         bad = root / "bad.ipa"
         with zipfile.ZipFile(bad, "w") as archive:

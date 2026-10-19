@@ -3,6 +3,7 @@
 #include "nvn_host.h"
 #include "nvn_shader.h"
 #include <stdatomic.h>
+#include <pthread.h>
 
 static void snapshot(nvn_resource_snapshot *out, const void *object, unsigned type) {
     memset(out,0,sizeof *out);
@@ -88,9 +89,19 @@ static void buffers(NVNcommandBuffer *c,int kind,int stage,int first,int count,c
         NVN_DIE("invalid buffer bindings");
     for (int i=0;i<count;++i)
         if (ranges[i].size>UINT64_MAX-ranges[i].address) NVN_DIE("buffer binding overflow");
+    /* 真机 v0.6.19：前 24 条全是槽 0，把标题画面后面的绑定槽全淹了 ——
+     * 改成每个 (kind,stage,first,count) 组合记一次（上限 128 组）。 */
+    static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
+    static unsigned seen[32];
+    unsigned bit=1u<<kind;
+    pthread_mutex_lock(&lock);
+    if(!(seen[stage]&bit)){seen[stage]|=bit;
+        NVN_LOG("NVN_BUFFER_BINDING kind=%d stage=%d first=%d count=%d",kind,stage,first,count);}
     static _Atomic unsigned diagnostics;
-    if(atomic_fetch_add(&diagnostics,1)<24)
-        NVN_LOG("NVN_BUFFER_BINDING kind=%d stage=%d first=%d count=%d",kind,stage,first,count);
+    if(first||count!=1){
+        if(atomic_fetch_add(&diagnostics,1)<256)
+            NVN_LOG("NVN_BUFFER_BINDING_EXTRA kind=%d stage=%d first=%d count=%d",kind,stage,first,count);}
+    pthread_mutex_unlock(&lock);
     size_t size=sizeof(nvn_cmd_buffers)+(size_t)count*sizeof *ranges;
     nvn_cmd_buffers *p=nvn_cmd_alloc(c,NVN_CMD_BIND_BUFFER,size);
     *p=(nvn_cmd_buffers){kind,stage,first,count};

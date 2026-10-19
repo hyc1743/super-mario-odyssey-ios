@@ -216,6 +216,13 @@ static void RunHost(void) {
         dm_progress_finish(DM_RUN_FAIL, "无法设置着色器资源路径");
         return;
     }
+    /* 真机诊断捕获（只写 Documents，可用「文件」App 导出，随日志一起提交）：
+     * 着色器失配样本（shader-*.bin）、每帧画面 PPM、绘制状态/可见性、Metal 错误详情。
+     * 代价是每帧一次同步回读（约几 MB），只用于定位黑屏/闪退的测试轮。 */
+    NSString *diagnostics = [docs.path stringByAppendingPathComponent:@"SMODiagnostics"];
+    [fm createDirectoryAtPath:diagnostics withIntermediateDirectories:YES attributes:nil error:NULL];
+    setenv("SMO_SHADER_CAPTURE_DIR", diagnostics.fileSystemRepresentation, 1);
+    setenv("SMO_FRAME_CAPTURE_DIR", diagnostics.fileSystemRepresentation, 1);
     /* C constructors run before NSBundle paths are available. Reload explicitly
      * before entering any guest code; the CLI constructor keeps its own path. */
     nvn_shader_reset();

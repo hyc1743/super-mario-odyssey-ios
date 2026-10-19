@@ -317,6 +317,10 @@ static MTLVertexFormat vertex_format(unsigned fmt) {
     V(41,Half4);V(42,UShort4Normalized);V(43,Short4Normalized);V(44,UShort4);V(45,Short4);
     V(46,Float4);V(47,UInt4);V(48,Int4);
     V(61,UInt1010102Normalized);
+    /* NVN 0x69 (decimal 105) is the signed 10:10:10:2 vertex format.
+     * Odyssey uses it for packed normals/tangents.  Treating it as an
+     * unknown format made every pipeline using those meshes get dropped. */
+    V(105,Int1010102Normalized);
 #undef V
     default:return MTLVertexFormatInvalid;
     }

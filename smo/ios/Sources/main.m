@@ -81,7 +81,7 @@ static void RunHost(void) {
                     appropriateForURL:nil create:NO error:nil];
     char ep[1024];
     if (!docs || !dm_exefs_path(ep, sizeof ep, docs.path.UTF8String)) {
-        LOG("App：Documents 里没有 ExeFS —— 只显示状态页（把改写产物放进「文件」App 的 SMOMobile/ExeFS）");
+        LOG("App：Documents 里没有 ExeFS —— 只显示状态页（按 nxnative 路线把 exefs 放进「文件」App 的 SMOMobile/exefs；旧的 SMO Resource/ExeFS 也兼容）");
         dm_progress_stage(1, 6, "检查游戏文件");
         dm_progress_finish(DM_RUN_FAIL, "没找到 ExeFS：用「文件」App 把游戏文件放进 SMOMobile");
         return;
@@ -164,7 +164,7 @@ static void RunHost(void) {
     {
         char rp[1024];
         if (!dm_romfs_path(rp, sizeof rp, docs.path.UTF8String)) {
-            LOG("【红】Documents 里没有 RomFS（放好 RomFS 目录，或 RomFS.smoa.N 卷）");
+            LOG("【红】Documents 里没有 RomFS（按 nxnative 路线放进「文件」App 的 SMOMobile/romfs；旧的 SMO Resource/RomFS 或 RomFS.smoa.N 卷也兼容）");
             dm_progress_finish(DM_RUN_FAIL, "没找到 RomFS（游戏资源）");
             return;
         }

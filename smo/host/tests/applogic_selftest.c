@@ -144,6 +144,19 @@ int main(void) {
 
     char p[1024];
     CHK(dm_romfs_path(p, sizeof p, root) == 1, "直接放根目录的 RomFS 能找到");
+    /* nxnative-compatible lowercase layout used by the Files app. */
+    const char *lower_root = "/tmp/smo_applogic_lower";
+    SMO_RMDIR(lower_root); SMO_MKDIR(lower_root);
+    char lower[512]; snprintf(lower, sizeof lower, "%s/romfs", lower_root); mkdir(lower, 0700);
+    CHK(dm_romfs_path(p, sizeof p, lower_root) == 1 && strstr(p, "romfs"), "nxnative lowercase romfs 能找到");
+    char lower_exe[512]; snprintf(lower_exe, sizeof lower_exe, "%s/exefs", lower_root); mkdir(lower_exe, 0700);
+    CHK(dm_exefs_path(p, sizeof p, lower_root) == 1 && strstr(p, "exefs"), "nxnative lowercase exefs 能找到");
+    SMO_RMDIR(lower); SMO_RMDIR(lower_exe); SMO_RMDIR(lower_root);
+    const char *upper_root = "/tmp/smo_applogic_upper";
+    SMO_RMDIR(upper_root); SMO_MKDIR(upper_root);
+    char upper[512]; snprintf(upper, sizeof upper, "%s/RomFS", upper_root); mkdir(upper, 0700);
+    CHK(dm_romfs_path(p, sizeof p, upper_root) == 1 && strstr(p, "RomFS"), "旧版大写 RomFS 仍能找到");
+    SMO_RMDIR(upper); SMO_RMDIR(upper_root);
     CHK(strstr(p, "RomFS") != NULL, "路径以 RomFS 结尾");   // 不写死分隔符：Windows 是反斜杠
 
     SMO_RMDIR("/tmp/smo_applogic_test/RomFS");

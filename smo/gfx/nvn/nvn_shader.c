@@ -143,7 +143,16 @@ const nvn_shader_ent *nvn_shader_find_control(const uint8_t *ctrl, size_t n) {
 const nvn_shader_ent *nvn_shader_find_gpu(uint64_t address, nvn_shader_match *out) {
     nvn_shader_match result = {0};
     const nvn_shader_ent *found = NULL;
-    static const unsigned offsets[] = {0, 0x30};
+    /* nxnative accepts both the canonical SPH-at-0x30 layout and shader
+     * records where the control wrapper adds a small header.  The old SMO
+     * matcher tried only 0 and 0x30, producing candidates=0 for Odyssey's
+     * program 12699/12700/12701 even though their code was present.  Scan a
+     * bounded 8-byte window; the full declared span hash below remains the
+     * acceptance criterion, so this cannot turn an incidental prefix into a
+     * shader match. */
+    static const unsigned offsets[] = {0, 8, 16, 24, 0x30, 0x38, 0x40, 0x48,
+                                       0x50, 0x58, 0x60, 0x68, 0x70, 0x78,
+                                       0x80, 0x88, 0x90, 0x98, 0xa0};
     for (unsigned o = 0; o < sizeof offsets / sizeof offsets[0]; ++o) {
         uint64_t at = address + offsets[o], base, length;
         if (at < address || !nvn_st_pool_range(at, 8, &base, &length)) continue;

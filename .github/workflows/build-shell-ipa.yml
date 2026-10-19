@@ -36,6 +36,7 @@ jobs:
 
   shell:
     name: Public shell (no game inputs)
+    if: github.event_name != 'workflow_dispatch' || inputs.mode == 'shell'
     needs: verify
     runs-on: macos-26
     timeout-minutes: 60

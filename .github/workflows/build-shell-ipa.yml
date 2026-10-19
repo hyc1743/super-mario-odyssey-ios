@@ -109,6 +109,8 @@ jobs:
           python scripts/nxnative_github.py --private-repo "$PRIVATE_STORAGE_REPO" fetch-inputs \
             --input-tag "$INPUT_TAG" --destination "$RUNNER_TEMP/nxnative-inputs"
       - name: Build personal IPA and external resource parts
+        env:
+          SMO_PRIVATE_TOKEN: ${{ secrets.SMO_PRIVATE_TOKEN }}
         run: |
           set +e
           mkdir -p "$RUNNER_TEMP/nxnative-personal"
@@ -119,8 +121,15 @@ jobs:
             --discard-runner-inputs --output "$RUNNER_TEMP/nxnative-personal" \
             > "$RUNNER_TEMP/nxnative-personal/build-console.log" 2>&1 &
           build_pid=$!
+          heartbeat=0
           while kill -0 "$build_pid" 2>/dev/null; do
-            echo "Personal build running. Detailed logs remain private."
+            echo "Personal build running in $GITHUB_REPOSITORY. Detailed logs remain in private release storage."
+            heartbeat=$((heartbeat + 1))
+            if [ "$((heartbeat % 10))" -eq 0 ]; then
+              python scripts/nxnative_github.py --private-repo "$PRIVATE_STORAGE_REPO" publish --logs-only \
+                --directory "$RUNNER_TEMP/nxnative-personal" --tag "nxnative-${{ github.run_id }}" \
+                > "$RUNNER_TEMP/nxnative-progress-upload.log" 2>&1 || true
+            fi
             sleep 30
           done
           wait "$build_pid"

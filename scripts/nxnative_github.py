@@ -26,6 +26,17 @@ sys.path.insert(0, str(ROOT / "smo/nxnative"))
 from package import BLOCK, LOCK, PART_BYTES, join_parts, json_bytes, safe_name, sha256
 
 
+class GitHubRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(request, fp, code, msg, headers, newurl)
+        if redirected and urllib.parse.urlsplit(request.full_url).netloc != urllib.parse.urlsplit(newurl).netloc:
+            # Release assets and Actions artifacts redirect to signed storage
+            # URLs. A GitHub bearer token is neither needed nor valid there.
+            redirected.remove_header("Authorization")
+            redirected.remove_header("X-github-api-version")
+        return redirected
+
+
 class RangeReader:
     def __init__(self, path, start, size):
         self.stream = Path(path).open("rb")
@@ -71,7 +82,8 @@ class GitHub:
                    "Content-Type": content_type}
         if size is not None:
             headers["Content-Length"] = str(size)
-        return urllib.request.urlopen(urllib.request.Request(url, data=data, method=method, headers=headers), timeout=180)
+        opener = urllib.request.build_opener(GitHubRedirect())
+        return opener.open(urllib.request.Request(url, data=data, method=method, headers=headers), timeout=180)
 
     def api(self, method, url, data=None):
         with self.request(method, url, data) as response:

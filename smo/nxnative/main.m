@@ -70,7 +70,7 @@ void front_ios_boot(void) {
                 self.message.text = [NSString stringWithFormat:@"Verifying resources / 正在校验资源\n%lu / %lu", (unsigned long)n, (unsigned long)total];
             });
         }) : @"The app's package identity is missing. Reinstall the IPA.";
-        if (!personal) error = [NSString stringWithFormat:@"Pure shell / 纯壳版本\nInstall your personal IPA from the private build to run the game.\n请安装私有构建生成的个人 IPA，再复制资源。\n\n%@", error ?: @"Resources verified / 资源校验通过"];
+        if (!personal) error = [NSString stringWithFormat:@"Pure shell / 纯壳版本\nInstall your personal IPA, then copy the resource folders.\n请安装个人 IPA，再复制资源目录。\n\n%@", error ?: @"Resources verified / 资源校验通过"];
         if (error) {
             fprintf(stderr, "boot: %s\n", error.UTF8String);
             dispatch_async(dispatch_get_main_queue(), ^{ self.message.text = error; self.check.enabled = YES; });

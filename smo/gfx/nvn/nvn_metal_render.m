@@ -74,6 +74,20 @@ static NSString *target_identity(const nvn_resource_snapshot *r) {
     return [NSString stringWithFormat:@"%llx:%llu",(unsigned long long)r->object,
         (unsigned long long)r->words[15]];
 }
+static int depth_pixel_format(MTLPixelFormat f) {
+    switch(f){
+    case MTLPixelFormatDepth16Unorm:case MTLPixelFormatDepth32Float:
+    case MTLPixelFormatDepth32Float_Stencil8:case MTLPixelFormatDepth24Unorm_Stencil8:return 1;
+    default:return 0;
+    }
+}
+static int stencil_pixel_format(MTLPixelFormat f) {
+    switch(f){
+    case MTLPixelFormatStencil8:case MTLPixelFormatX24_Stencil8:case MTLPixelFormatX32_Stencil8:
+    case MTLPixelFormatDepth32Float_Stencil8:case MTLPixelFormatDepth24Unorm_Stencil8:return 1;
+    default:return 0;
+    }
+}
 uint64_t nvn_metal_render_generation(NSObject *state,const nvn_resource_snapshot *r) {
     return ((SMORenderState *)state).drawGenerations[target_identity(r)].unsignedLongLongValue;
 }
@@ -109,13 +123,38 @@ static MTLRenderPassDescriptor *pass_for(SMOGuestEncoder *e) {
     }
     if(s->targets.depth.resource.object){
         id<MTLTexture> t=attachment_texture(e,&s->targets.depth);if(!t || t.arrayLength!=1)return nil;
-        if(t.pixelFormat!=MTLPixelFormatStencil8){
+        MTLPixelFormat f=t.pixelFormat;
+        /* 真机 v0.6.19：游戏把一个 RG11B10Float 贴图当深度目标绑定。以前任何非 Stencil8
+         * 格式都进 depthAttachment → Metal 校验断言「not depth renderable」→ SIGABRT。
+         * 深度附件格式不合法时：记一次完整证据（贴图描述字 + 视图状态 + 生效格式），
+         * 丢这个深度附件继续画颜色（绝不进 Metal 描述符）。 */
+        if(!depth_pixel_format(f)){
+            static NSMutableSet<NSString *> *reported;
+            NSString *identity=[target_identity(&s->targets.depth.resource) stringByAppendingFormat:@":%lu",(unsigned long)f];
+            @synchronized([SMORenderState class]){
+                if(!reported)reported=[NSMutableSet new];
+                if(![reported containsObject:identity]&&reported.count<8){
+                    [reported addObject:identity];
+                    const uint64_t *w=s->targets.depth.resource.words;
+                    nvn_view_state v={0};if(s->targets.depth.has_view)v=s->targets.depth.view;
+                    NVN_LOG("NVN_METAL_DEPTH_TARGET_BAD object=%#llx serial=%llu words=%#llx,%#llx,%#llx,%#llx,%#llx,%#llx,%#llx,%#llx,%#llx,%#llx,%#llx,%#llx,%#llx,%#llx,%#llx,%#llx view=%u,%d,%d,%d,%d,%d,%d,%u,%u,%u,%u,%d texture=%lu/%lu/%lu/%lu",
+                        (unsigned long long)s->targets.depth.resource.object,(unsigned long long)w[15],
+                        (unsigned long long)w[0],(unsigned long long)w[1],(unsigned long long)w[2],(unsigned long long)w[3],
+                        (unsigned long long)w[4],(unsigned long long)w[5],(unsigned long long)w[6],(unsigned long long)w[7],
+                        (unsigned long long)w[8],(unsigned long long)w[9],(unsigned long long)w[10],(unsigned long long)w[11],
+                        (unsigned long long)w[12],(unsigned long long)w[13],(unsigned long long)w[14],(unsigned long long)w[15],
+                        s->targets.depth.has_view!=0,v.flags,v.base_level,v.level_count,v.base_layer,v.layer_count,
+                        v.format,v.target,v.swizzle[0],v.swizzle[1],v.swizzle[2],v.swizzle[3],v.depth_stencil,
+                        (unsigned long)f,(unsigned long)t.textureType,(unsigned long)t.arrayLength,(unsigned long)t.sampleCount);
+                }
+            }
+        }else{
             p.depthAttachment.texture=t;p.depthAttachment.loadAction=MTLLoadActionLoad;p.depthAttachment.storeAction=MTLStoreActionStore;
         }
-        if(t.pixelFormat==MTLPixelFormatDepth32Float_Stencil8 || t.pixelFormat==MTLPixelFormatStencil8){
+        if(stencil_pixel_format(f)){
             p.stencilAttachment.texture=t;p.stencilAttachment.loadAction=MTLLoadActionLoad;p.stencilAttachment.storeAction=MTLStoreActionStore;
         }
-        active++;
+        if(p.depthAttachment.texture||p.stencilAttachment.texture)active++;
     }
     if(active&&getenv("SMO_FRAME_CAPTURE_DIR")){
         if(!e.visibilityBuffer)e.visibilityBuffer=[e.device newBufferWithLength:4096 options:MTLResourceStorageModeShared];
@@ -272,7 +311,10 @@ static id<MTLRenderPipelineState> clear_pipeline(SMOGuestEncoder *e,MTLRenderPas
         [key appendFormat:@":%lu",(unsigned long)t.pixelFormat];if(t)samples=t.sampleCount;}
     id<MTLTexture> depth=pass.depthAttachment.texture,stencil=pass.stencilAttachment.texture;
     if(depth||stencil)samples=(depth?:stencil).sampleCount;
-    [key appendFormat:@":%lu:%lu:%lu",(unsigned long)depth.pixelFormat,(unsigned long)stencil.pixelFormat,(unsigned long)samples];
+    MTLPixelFormat depth_fmt=depth.pixelFormat,stencil_fmt=stencil.pixelFormat;
+    if(!depth_pixel_format(depth_fmt))depth_fmt=MTLPixelFormatInvalid;
+    if(!stencil_pixel_format(stencil_fmt))stencil_fmt=MTLPixelFormatInvalid;
+    [key appendFormat:@":%lu:%lu:%lu",(unsigned long)depth_fmt,(unsigned long)stencil_fmt,(unsigned long)samples];
     @synchronized([SMORenderState class]){
         if(!cache)cache=[NSMutableDictionary new];
         id<MTLRenderPipelineState> cached=cache[key];if(cached)return cached;
@@ -295,7 +337,7 @@ static id<MTLRenderPipelineState> clear_pipeline(SMOGuestEncoder *e,MTLRenderPas
         for(unsigned i=0;i<8;i++){id<MTLTexture> t=pass.colorAttachments[i].texture;if(!t)continue;
             d.colorAttachments[i].pixelFormat=t.pixelFormat;
             d.colorAttachments[i].writeMask=(int)i==index?write_mask(mask):MTLColorWriteMaskNone;}
-        d.depthAttachmentPixelFormat=depth.pixelFormat;d.stencilAttachmentPixelFormat=stencil.pixelFormat;
+        d.depthAttachmentPixelFormat=depth_fmt;d.stencilAttachmentPixelFormat=stencil_fmt;
         d.rasterSampleCount=samples;
         cached=[e.device newRenderPipelineStateWithDescriptor:d error:&error];
         if(!cached){NVN_LOG("NVN_METAL_CLEAR_PIPELINE_FAILED stage=pipeline code=%ld",(long)error.code);return nil;}
@@ -329,6 +371,19 @@ static int scissored_clear(SMOGuestEncoder *e,MTLRenderPassDescriptor *pass,id<M
     [r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
     [r endEncoding];return 1;
 }
+/* 之前管线早退全部静默 → 真机日志只有 235 条「render pipeline」不知道原因。
+ * 每个原因记一次（限条数），下一轮日志直接给出黑色画面的出处。 */
+static int pipeline_skip(NSString *reason) {
+    static NSMutableSet<NSString *> *seen;
+    @synchronized([SMORenderState class]){
+        if(!seen)seen=[NSMutableSet new];
+        if(![seen containsObject:reason]&&seen.count<64){
+            [seen addObject:reason];
+            NVN_LOG("NVN_METAL_PIPELINE_SKIP %s",reason.UTF8String);
+        }
+    }
+    return 0;
+}
 static id<MTLRenderPipelineState> pipeline_for(SMOGuestEncoder *e,MTLRenderPassDescriptor *pass) {
     SMORenderState *s=(SMORenderState *)e.renderState;
     if(!s.vs)return nil;
@@ -339,36 +394,52 @@ static id<MTLRenderPipelineState> pipeline_for(SMOGuestEncoder *e,MTLRenderPassD
     for(unsigned i=0;i<8;i++){
         id<MTLTexture> tex=pass.colorAttachments[i].texture;
         if(!tex)continue;
-        if(samples && samples!=tex.sampleCount)return nil;samples=tex.sampleCount;
+        if(samples && samples!=tex.sampleCount)
+            return pipeline_skip([NSString stringWithFormat:@"color sample mismatch %lu/%lu",(unsigned long)samples,(unsigned long)tex.sampleCount]);
+        samples=tex.sampleCount;
         MTLRenderPipelineColorAttachmentDescriptor *a=d.colorAttachments[i];a.pixelFormat=tex.pixelFormat;
         a.writeMask=write_mask((s->channel.mask>>(4*i))&15);a.blendingEnabled=(s->color.blend_en>>i)&1;
         nvn_blend_state b=s->blends[i];
-        if(b.advanced_mode || b.eq_rgb<1 || b.eq_rgb>5 || b.eq_a<1 || b.eq_a>5)return nil;
-        a.sourceRGBBlendFactor=blend_factor(b.src_rgb);a.destinationRGBBlendFactor=blend_factor(b.dst_rgb);
-        a.sourceAlphaBlendFactor=blend_factor(b.src_a);a.destinationAlphaBlendFactor=blend_factor(b.dst_a);
-        if(a.sourceRGBBlendFactor==(MTLBlendFactor)NSUIntegerMax || a.destinationRGBBlendFactor==(MTLBlendFactor)NSUIntegerMax ||
-           a.sourceAlphaBlendFactor==(MTLBlendFactor)NSUIntegerMax || a.destinationAlphaBlendFactor==(MTLBlendFactor)NSUIntegerMax)return nil;
-        a.rgbBlendOperation=(MTLBlendOperation)(b.eq_rgb-1);a.alphaBlendOperation=(MTLBlendOperation)(b.eq_a-1);
+        if(a.blendingEnabled){
+            /* NVN 语义：混合关闭时方程与因子不参与硬件，不因未支持的因子丢绘制。
+             * （真机 v0.6.19：×235 render pipeline 静默丢弃，混合因子嫌疑最大。） */
+            if(b.advanced_mode || b.eq_rgb<1 || b.eq_rgb>5 || b.eq_a<1 || b.eq_a>5)
+                return pipeline_skip([NSString stringWithFormat:@"blend equation advanced=%u rgb=%u alpha=%u",b.advanced_mode,b.eq_rgb,b.eq_a]);
+            a.sourceRGBBlendFactor=blend_factor(b.src_rgb);a.destinationRGBBlendFactor=blend_factor(b.dst_rgb);
+            a.sourceAlphaBlendFactor=blend_factor(b.src_a);a.destinationAlphaBlendFactor=blend_factor(b.dst_a);
+            if(a.sourceRGBBlendFactor==(MTLBlendFactor)NSUIntegerMax || a.destinationRGBBlendFactor==(MTLBlendFactor)NSUIntegerMax ||
+               a.sourceAlphaBlendFactor==(MTLBlendFactor)NSUIntegerMax || a.destinationAlphaBlendFactor==(MTLBlendFactor)NSUIntegerMax)
+                return pipeline_skip([NSString stringWithFormat:@"blend factor src_rgb=%u dst_rgb=%u src_a=%u dst_a=%u",b.src_rgb,b.dst_rgb,b.src_a,b.dst_a]);
+            a.rgbBlendOperation=(MTLBlendOperation)(b.eq_rgb-1);a.alphaBlendOperation=(MTLBlendOperation)(b.eq_a-1);
+        }
         [key appendFormat:@":%u:%lu:%u:%u:%u:%u:%u:%u:%u",i,(unsigned long)tex.pixelFormat,(s->channel.mask>>(4*i))&15,
             a.blendingEnabled,(unsigned)b.src_rgb,(unsigned)b.dst_rgb,(unsigned)b.src_a,(unsigned)b.dst_a,(unsigned)(b.eq_rgb|(b.eq_a<<4))];
     }
     id<MTLTexture> depth=pass.depthAttachment.texture ?: pass.stencilAttachment.texture;
-    if(depth){if(samples && samples!=depth.sampleCount)return nil;samples=depth.sampleCount;}
+    if(depth){if(samples && samples!=depth.sampleCount)
+        return pipeline_skip([NSString stringWithFormat:@"depth sample mismatch %lu/%lu",(unsigned long)samples,(unsigned long)depth.sampleCount]);
+        samples=depth.sampleCount;}
     d.rasterSampleCount=samples?:1;
     nvn_multisample_state ms=s->multisample;
     if((ms.samples&&ms.samples!=d.rasterSampleCount)||
-       (d.rasterSampleCount>1&&!ms.enabled)||(ms.alpha_to_coverage&&ms.dither))return nil;
+       (d.rasterSampleCount>1&&!ms.enabled)||(ms.alpha_to_coverage&&ms.dither))
+        return pipeline_skip([NSString stringWithFormat:@"multisample state samples=%u enabled=%u a2c=%u dither=%u raster=%lu",ms.samples,ms.enabled,ms.alpha_to_coverage,ms.dither,(unsigned long)d.rasterSampleCount]);
     d.alphaToCoverageEnabled=ms.alpha_to_coverage!=0;
     [key appendFormat:@":a2c%u",ms.alpha_to_coverage];
-    d.depthAttachmentPixelFormat=pass.depthAttachment.texture.pixelFormat;
-    d.stencilAttachmentPixelFormat=pass.stencilAttachment.texture.pixelFormat;
-    [key appendFormat:@":%lu:%lu:%lu",(unsigned long)d.rasterSampleCount,(unsigned long)d.depthAttachmentPixelFormat,(unsigned long)d.stencilAttachmentPixelFormat];
+    MTLPixelFormat depth_fmt=pass.depthAttachment.texture.pixelFormat;
+    MTLPixelFormat stencil_fmt=pass.stencilAttachment.texture.pixelFormat;
+    if(!depth_pixel_format(depth_fmt))depth_fmt=MTLPixelFormatInvalid;
+    if(!stencil_pixel_format(stencil_fmt))stencil_fmt=MTLPixelFormatInvalid;
+    d.depthAttachmentPixelFormat=depth_fmt;d.stencilAttachmentPixelFormat=stencil_fmt;
+    [key appendFormat:@":%lu:%lu:%lu",(unsigned long)d.rasterSampleCount,(unsigned long)depth_fmt,(unsigned long)stencil_fmt];
     MTLVertexDescriptor *vd=[MTLVertexDescriptor vertexDescriptor];
     for(NSDictionary *input in s.vs.bindings[@"vertex_inputs"]){
-        unsigned location=[input[@"location"] unsignedIntValue];if(location>=16)return nil;
-        nvn_vertex_attrib_state a=s->attributes[location];if(a.stream>=16)return nil;
+        unsigned location=[input[@"location"] unsignedIntValue];if(location>=16)return pipeline_skip(@"vertex location >= 16");
+        nvn_vertex_attrib_state a=s->attributes[location];if(a.stream>=16)return pipeline_skip(@"vertex stream >= 16");
         nvn_vertex_stream_state stream=s->streams[a.stream];
-        MTLVertexFormat fmt=vertex_format(a.fmt);if(!fmt || !stream.stride)return nil;
+        MTLVertexFormat fmt=vertex_format(a.fmt);
+        if(!fmt)return pipeline_skip([NSString stringWithFormat:@"vertex format %u",(unsigned)a.fmt]);
+        if(!stream.stride)return pipeline_skip(@"vertex stream stride 0");
         vd.attributes[location].format=fmt;vd.attributes[location].offset=a.offset;vd.attributes[location].bufferIndex=1+a.stream;
         vd.layouts[1+a.stream].stride=stream.stride;vd.layouts[1+a.stream].stepFunction=stream.divisor?MTLVertexStepFunctionPerInstance:MTLVertexStepFunctionPerVertex;
         vd.layouts[1+a.stream].stepRate=stream.divisor?:1;
@@ -439,12 +510,14 @@ static int arguments_for(SMOGuestEncoder *e,SMOMetalShader *shader,unsigned stag
     else [e.render setFragmentBuffer:args offset:0 atIndex:index];
     return 1;
 }
-static int set_depth_state(SMOGuestEncoder *e) {
+static int set_depth_state(SMOGuestEncoder *e,MTLRenderPassDescriptor *pass) {
     SMORenderState *s=(SMORenderState *)e.renderState;nvn_depth_state d=s->depth;
     if(d.df<1 || d.df>8)return 0;
     MTLDepthStencilDescriptor *desc=[MTLDepthStencilDescriptor new];
     desc.depthCompareFunction=d.dt?(MTLCompareFunction)(d.df-1):MTLCompareFunctionAlways;
-    desc.depthWriteEnabled=d.dt&&d.dw;
+    /* 深度附件被守卫丢弃（格式不合法）时不能再开深度写：Metal 校验会报
+     * 「depth write enabled without depth attachment」。 */
+    desc.depthWriteEnabled=d.dt&&d.dw&&pass.depthAttachment.texture!=nil;
     if(d.st){
         unsigned funcs[]={d.sf_f,d.sf_b},fail[]={d.fail_f,d.fail_b},zfail[]={d.zfail_f,d.zfail_b},zpass[]={d.zpass_f,d.zpass_b};
         for(unsigned i=0;i<2;i++){
@@ -500,7 +573,7 @@ static int prepare_draw(SMOGuestEncoder *e) {
         e.render=[e.command renderCommandEncoderWithDescriptor:pass];if(!e.render)return 0;
     }
     [e.render setRenderPipelineState:pipeline];
-    if(!set_depth_state(e))return 0;
+    if(!set_depth_state(e,pass))return 0;
     if(s->polygon.cull==NVN_FACE_FRONT_AND_BACK)return 2;  /* 两面都剔除：本来就什么都不画 */
     [e.render setCullMode:s->polygon.cull==NVN_FACE_FRONT?MTLCullModeFront:s->polygon.cull==NVN_FACE_BACK?MTLCullModeBack:MTLCullModeNone];
     [e.render setFrontFacingWinding:s->polygon.front?MTLWindingCounterClockwise:MTLWindingClockwise];

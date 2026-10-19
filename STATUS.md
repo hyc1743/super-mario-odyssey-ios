@@ -2458,3 +2458,41 @@ Windows 快速回归 7/7 通过（含新增 vi_selftest，共 16 个 C 自检）
 另外 `dm_log_summarize()` 已接进 App 的「导出日志」：以后导出会同时产出 `SMO-log-summary-*.txt`
 （几十 KB，直接发聊天窗口即可）。`logsum_selftest` 覆盖：比原日志小一个量级、同类合并计数正确、
 错误行与最后一行保留、空日志/缺失源文件的错误路径。
+
+## 2.127 真机第十一轮：游戏世界里黑屏后闪退 = RG11B10F 被当深度附件（v0.6.19 → v0.6.20）
+
+v0.6.19 声音正常、标题画面可见。按 Start 进入游戏世界后黑屏，几秒后闪退。两份日志的尾部：
+
+```
+[smo] [nvn] NVN_METAL_RENDER_UNSUPPORTED render pipeline            ×235（53.2~56.6 s）
+[smo] [nvn] NVN_METAL_BINDING_UNRESOLVED stage=0 name=vp_c1          多次
+validateWithDevice:5101: failed assertion `Render Pipeline Descriptor Validation
+depthAttachmentPixelFormat MTLPixelFormatRG11B10Float is not depth renderable.'
+【崩溃】SIGABRT …
+```
+
+**闪退链条**：游戏世界里有条绘制把「RG11B10F」格式的贴图绑成了深度目标（`pass_for` 里以前
+任何非 Stencil8 格式都进 `depthAttachment`）→ `pipeline_for` 把它的 pixelFormat 抄进
+`depthAttachmentPixelFormat` → Metal 校验断言直接 abort。v0.6.19 之前的日志里
+`NVN_METAL_RESOURCE_UNSUPPORTED`/`TEXTURE_REJECT` 一次都没有，说明这张贴图**解析成功**，
+不是附件解析失败，而是格式本身不是深度格式。
+
+修法（守卫 + 证据，不猜）：
+1. `pass_for`：深度附件格式必须可深度渲染（Depth16Unorm/Depth32Float/D32S8/D24S8），
+   否则**丢这个深度附件继续画颜色**（不再 abort）。同时记一条 `NVN_METAL_DEPTH_TARGET_BAD`：
+   完整 16 个描述字 + 视图状态（flags/levels/layers/format/target/swizzle/depth_stencil）+
+   生效纹理格式/类型/层数/采样数 —— 下一轮日志直接给出「游戏到底绑了什么」的真相
+2. `pipeline_for` / `clear_pipeline`：depthAttachmentPixelFormat / stencilAttachmentPixelFormat
+   同样只接受合法格式（其余按 Invalid 处理），管线键同步
+3. `set_depth_state`：深度附件被守卫丢弃时不再开深度写（避免「depth write enabled without
+   depth attachment」校验告警）
+4. 模板附件由「只有 Stencil8/D32S8」放宽到全部可模板渲染格式（X24/X32_Stencil8 等）
+
+**黑屏取证**：之前 235 条「render pipeline」全部静默早退（管线键里某个状态不支持），日志里
+没有原因。`pipeline_for` 每条早退路径现在各记一次 `NVN_METAL_PIPELINE_SKIP`（混合方程/混合因子/
+采样数不匹配/多重采样状态/顶点布局），下一轮日志直接给出黑屏出处。同时修了一个真 bug：
+**混合关闭时方程与因子不再参与硬件**，以前混合关闭但绑了不支持因子的绘制也会被丢
+（NVN 语义里混合关闭时因子无意义）。
+
+回归测试（macOS CI 可验）：`metal_render_selftest` 新增深度附件守卫用例 ——
+RG11B10F 当深度目标 + 画颜色 → 不崩溃、颜色照画；DEPTH32F + ClearDepthStencil → 正常。

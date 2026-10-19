@@ -165,12 +165,39 @@ int main(void) {
                 assert(pixel[0]==(inside?255:0)&&pixel[1]==0&&pixel[2]==(inside?0:255)&&pixel[3]==255);
             }
         }
+        /* 深度附件格式守卫（真机 v0.6.19 SIGABRT 回归）：RG11B10F 被游戏当深度目标绑定。
+         * 以前任何非 Stencil8 格式都进 depthAttachmentPixelFormat → Metal 校验断言
+         * 「not depth renderable」→ 进程被收走。守卫后：附件被丢、颜色照画。 */
+        NVNtexture badDepth,goodDepth;
+        uint64_t depthWords[16]={0,16,16,1,1,63,16,1,1,P(&pool),page*3+2048,64,0,0,0,5};
+        nvn_st_ent *bd=nvn_st_new(&badDepth,12);memcpy(bd->v,depthWords,sizeof depthWords);
+        depthWords[5]=52;depthWords[15]=6;
+        nvn_st_ent *gd=nvn_st_new(&goodDepth,12);memcpy(gd->v,depthWords,sizeof depthWords);
+        for(int depthCase=0;depthCase<2;depthCase++){
+            NVNtexture *depthTexture=depthCase?&goodDepth:&badDepth;
+            C(CommandBufferBeginRecording,&cb,0,0,0,0,0);
+            C(CommandBufferSetRenderTargets,&cb,1,P(targets),0,P(depthTexture),0);
+            C(CommandBufferSetViewport,&cb,0,0,16,16,0);C(CommandBufferSetScissor,&cb,0,0,16,16,0);
+            C(CommandBufferClearColor,&cb,0,P(clear),15,0,0);
+            if(depthCase){uint32_t bits;float half=0.5f;memcpy(&bits,&half,4);
+                C(CommandBufferClearDepthStencil,&cb,(uint64_t)bits,1,0,0xff,0);}
+            C(CommandBufferSetScissor,&cb,4,4,8,8,0);
+            C(CommandBufferDrawElements,&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,NVN_INDEX_TYPE_UNSIGNED_SHORT,3,P(memory+page*2+128),0);
+            uint64_t guarded=C(CommandBufferEndRecording,&cb,0,0,0,0,0);
+            C(QueueSubmitCommands,&q,1,P(&guarded),0,0,0);C(QueueFenceSync,&q,P(&sync),0,0,0,0);
+            assert(C(SyncWait,&sync,UINT64_C(5000000000),0,0,0,0)<2);
+            [tex getBytes:pixels bytesPerRow:64 fromRegion:MTLRegionMake2D(0,0,16,16) mipmapLevel:0];
+            for(int y=0;y<16;y++)for(int x=0;x<16;x++){
+                uint8_t *pixel=pixels+(y*16+x)*4;int inside=x>=4&&x<12&&y>=4&&y<12;
+                assert(pixel[0]==(inside?255:0)&&pixel[1]==0&&pixel[2]==(inside?0:255)&&pixel[3]==255);
+            }
+        }
         C(WindowFinalize,&window,0,0,0,0,0);
         C(QueueFinalize,&q,0,0,0,0,0);C(SyncFinalize,&sync,0,0,0,0,0);C(CommandBufferFinalize,&cb,0,0,0,0,0);
         C(TexturePoolFinalize,&tp,0,0,0,0,0);C(SamplerPoolFinalize,&sp,0,0,0,0,0);
         nvn_metal_resources_reset();nvn_shader_reset();nvn_st_reset();free(memory);
         assert([[NSFileManager defaultManager] removeItemAtPath:root error:NULL]);
-        puts("METAL_RENDER_PASS: guest indexed draw, shader bindings, scissor, GPU timestamp/fence, cropped window snapshot on 16KiB stack and stale-frame exclusion");
+        puts("METAL_RENDER_PASS: guest indexed draw, shader bindings, scissor, GPU timestamp/fence, cropped window snapshot on 16KiB stack, stale-frame exclusion and non-depth depth-target guard");
     }
     return 0;
 }

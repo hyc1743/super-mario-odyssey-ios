@@ -81,7 +81,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'personal'
     needs: verify
     runs-on: macos-26
-    timeout-minutes: 180
+    timeout-minutes: 360
     env:
       PRIVATE_STORAGE_REPO: hyc1743/super-mario-odyssey-ios-build
     steps:

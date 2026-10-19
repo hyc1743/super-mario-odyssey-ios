@@ -1,4 +1,6 @@
 // nxnative iOS boot adapter: game data and translated shaders live in Documents.
+// Derived from nxnative's iOS entry point (MIT, copyright 2026 jhaizhou).
+// See third_party/nxnative.LICENSE; the original license also ships in the IPA.
 #import <UIKit/UIKit.h>
 #import "SMOResources.h"
 #include <pthread.h>

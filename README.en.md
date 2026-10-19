@@ -6,17 +6,20 @@ emulation; only the handful of instructions that cannot run unchanged under Appl
 rewritten, and the platform services it calls are provided by a host written for Apple platforms.
 **Bring your own game files** — this repository contains no game content.
 
-The technical path is taken wholesale from [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile)
-(MIT). License: MIT · Primary language: Chinese ([README.md](README.md)) · English: this file.
+The current IPA pipeline uses pinned [seedds/nxnative](https://github.com/seedds/nxnative) sources (MIT).
+The older runtime derives from [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile) (MIT)
+and remains as development history. License: MIT · Primary language: Chinese ([README.md](README.md)).
 
-> ## ⚠️ Status: early infrastructure — **not playable yet**
+> ## Status: nxnative 1.4.1 IPA; device gameplay pending
 >
-> This is work in progress, not a playable build. What is done and verified is "understand the game and
-> rewrite its program into a form Apple's kernel can execute"; the **host (system-service HLE), the
-> graphics layer (NVN→Metal) and touch input have not been started.**
+> The current pipeline combines the base NSP with update 1.4.1 and targets iOS/iPadOS 26+.
+> Both IPA modes build in public Actions. The personal IPA includes the game program;
+> merged RomFS and compiled shaders are restored separately and copied into Documents.
+> Title screen, levels, input and sound require device validation. Three geometry shaders for
+> thunder effects remain unsupported by the upstream translator.
 >
-> Progress, evidence and reproduction commands: **[STATUS.md](STATUS.md)**. Do not expect a game to
-> start yet — installing the current build shows a status page.
+> See [installation instructions](docs/README_INSTALL.md). [STATUS.md](STATUS.md) and the v0
+> measurements below describe the older runtime, not device validation of the new IPA.
 
 ## What it is, and what it is not
 
@@ -39,7 +42,10 @@ The technical path is taken wholesale from [jhaizhou-ops/d2r-mobile](https://git
   about the game* needed to make the port work, listed item by item in [docs/DERIVED.md](docs/DERIVED.md).
 - **Online.** No multiplayer; the game runs fully offline.
 
-## Progress
+## Older runtime development record
+
+These milestones and measurements concern the older runtime and v0 base game. Follow the
+[installation instructions](docs/README_INSTALL.md) for the current nxnative 1.4.1 pipeline.
 
 **Milestones** (towards running on a real device): **M0 guest side ready ✅** → **M1 installs, boots, logs on screen and can export them ✅** (host wired into the app, resources packed into two volumes) → M2 first frame → M3 title screen → M4 playable. Deliverables, verification method and size estimates per milestone are in the "project plan v2" section of [STATUS.md](STATUS.md).
 
@@ -67,7 +73,7 @@ The technical path is taken wholesale from [jhaizhou-ops/d2r-mobile](https://git
 embedded-image loading branch — both need macOS / a real device. Round-by-round measurements live in
 [STATUS.md](STATUS.md).
 
-## Facts measured from the game
+## Historical v0 measurements
 
 | Item | Measured |
 |---|---|
@@ -94,6 +100,20 @@ flowchart LR
 ```
 
 ## Building
+
+The current pipeline uses pinned nxnative sources and base + update **1.4.1**.
+Both modes run on hosted macOS runners in the public source repository. The
+private repository stores inputs, personal outputs and logs; it runs no Actions.
+Run the `build nxnative ipa` GitHub Actions workflow. Its default `shell` mode
+produces a public IPA with no game content. Manual `personal` builds fetch
+user-owned NSPs from a private release and keys from `SMO_PROD_KEYS`, then publish
+the personal IPA and separate resource parts only to the private storage repository.
+Restore the parts with `scripts/restore_nxnative_resources.py`, then copy `romfs/`,
+`msl/` and `resource_manifest.json` into the app's Documents. The personal IPA
+contains the rewritten game program; the public shell only checks resources.
+See [installation and build instructions](docs/README_INSTALL.md).
+
+The following routes describe the older runtime and are retained as historical notes.
 
 ### Route A: build on GitHub (recommended, no Mac needed)
 

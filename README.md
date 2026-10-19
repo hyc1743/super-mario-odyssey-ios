@@ -4,16 +4,19 @@
 直接在手机上执行，不模拟 CPU；只把「在苹果内核上不能原样执行的少量指令」改写掉，再自己实现它依赖的
 Switch 系统服务与图形接口。**自带游戏文件（bring your own game files）** —— 本仓库不含任何游戏内容。
 
-技术路径完全照搬 [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile)（MIT）。
+新的 IPA 构建使用固定版本的 [seedds/nxnative](https://github.com/seedds/nxnative)（MIT），
+支持本体叠加 1.4.1 升级档；RomFS 和编译后着色器由用户复制到应用 Documents。
+旧版兼容层源自 [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile)（MIT），保留作历史开发记录。
 协议：MIT · 主语言：中文 · English: [README.en.md](README.en.md)
 
-> ## ⚠️ 现在的状态：启动页已验证，完整游戏仍在验证
+> ## 当前状态：nxnative 1.4.1 IPA，真机游玩待验收
 >
-> 真机与 ARM64 启动检查已到达游戏的手柄说明/Start 页面；iOS 里已有双摇杆与 16 键触屏手柄，并接入游戏 HID 输入。
-> 当前重点是确认真机按键、持续音频和长时间运行温度。完整关卡游玩与长时间稳定性还没有验证通过。
+> 当前构建使用固定版本 nxnative，支持 v0 本体叠加 1.4.1 升级 NSP，目标为 iOS/iPadOS 26+。
+> 纯壳和个人 IPA 都在公共仓库 Actions 构建；个人 IPA 保留游戏程序，RomFS 和编译后着色器外置。
+> 新 IPA 的标题画面、关卡、输入与声音需侧载后验收；3 个雷电效果几何着色器仍不受上游翻译链支持。
 >
-> 真机手柄和性能说明见 [DEVICE_CONTROLS.md](docs/DEVICE_CONTROLS.md)，参考项目的取舍见 [REFERENCE_NXNATIVE.md](docs/REFERENCE_NXNATIVE.md)。
-> 想看每一步做到哪、依据是什么：**[STATUS.md](STATUS.md)**（带实测输出与复现命令）。
+> 安装与资源复制见 [README_INSTALL.md](docs/README_INSTALL.md)。[STATUS.md](STATUS.md)、
+> [DEVICE_CONTROLS.md](docs/DEVICE_CONTROLS.md) 和下方 v0 数据保留旧运行时的开发记录，不作为新 IPA 的真机验证结果。
 
 ---
 
@@ -37,7 +40,9 @@ Switch 系统服务与图形接口。**自带游戏文件（bring your own game 
   着色器标识等，逐项列在 [docs/DERIVED.md](docs/DERIVED.md)。
 - **不是能联机的**：没有多人，游戏全程离线，不需要在线账号。
 
-## 现在的进度
+## 旧运行时开发记录
+
+以下里程碑与测试数据针对旧运行时及 v0 本体。当前 nxnative 1.4.1 的构建和安装以 [安装说明](docs/README_INSTALL.md) 为准。
 
 **里程碑**（到「实机跑起来」）：**M0 客体侧就绪 ✅** → **M1 能装能启 + 日志上屏/导出 ✅**（宿主已接入 App，资源打成两卷）→ M2 第一帧（离屏部分已在 CI 验：清屏/着色器管线/纹理往返/管线缓存）→ M3 标题画面 → M4 能玩。逐项交付物、验证方式与规模估计见 [STATUS.md](STATUS.md) 的「项目计划 v2」。
 
@@ -58,14 +63,14 @@ Switch 系统服务与图形接口。**自带游戏文件（bring your own game 
 | 验证层（回归总入口 + 设计前提核验） | ✅ 通过 12 · 跳过 2 | `smo/verify/regress.sh`；NVN 不透明性 1012/1706 调用点 **0 反例** |
 | Metal 渲染 | ✅ Joy-Con 手柄说明页已由真实 ARM64 客体提交 GPU 并完成多帧呈现 | 完整关卡与真机持续表现仍需验证 |
 | iOS 三段内嵌出包 | ✅ 装载器、嵌入载荷与签名包检查已接入 CI | `gen_embed.py`、`check_embed.py` |
-| iOS App 壳 + 私有诊断 IPA（CI） | ✅ 已有私有构建路径；音频修复版正在重新验证 | `.github/workflows/build-shell-ipa.yml` |
+| iOS App 壳 + 私有诊断 IPA（旧 CI） | 历史实现；当前已切换公共仓库 nxnative 构建 | [安装说明](docs/README_INSTALL.md) |
 | 触屏手柄 | ✅ 双摇杆、16 键、多点触摸与 HID 输入已接入 | 首次真机按键测试见 [DEVICE_CONTROLS.md](docs/DEVICE_CONTROLS.md) |
 | 音频与温控 | 🚧 RemoteIO、混音节流和温控降帧已接入；持续出声/长时间温度仍需真机验证 | [DEVICE_CONTROLS.md](docs/DEVICE_CONTROLS.md) |
 
 **能不能完整游玩：还未确认** —— 已到达真实游戏启动页，但完整关卡运行、持续声音和长时间设备稳定性仍需验证。
 细节与每一轮的实测记录在 [STATUS.md](STATUS.md)。
 
-## 关于这个游戏，实测出来的事实
+## v0 本体的历史测量
 
 这些都是从你自己的游戏文件里量出来的，不是从别处抄的（详细输出见 [STATUS.md](STATUS.md)）：
 
@@ -107,38 +112,18 @@ flowchart LR
 
 ## 构建
 
-### 路线 A：在 GitHub 上出包（推荐，不需要 Mac）
+统一入口为 `python scripts/build_nxnative_ipa.py --mode shell|personal`。
+GitHub Actions 的 `build nxnative ipa` 在**当前公共仓库**使用 macOS/Xcode 构建，Windows 用户无需本地 Mac。
+私有仓库仅存储输入、个人产物和日志，不运行 Actions。
 
-[`.github/workflows/build-shell-ipa.yml`](.github/workflows/build-shell-ipa.yml) 会在 GitHub 的
-macOS runner 上（自带 Xcode）构建 App 壳并产出**未签名 IPA**，作为 artifact 与 Release 附件。
-你只需要：
+- 提交、PR 和默认手动构建只生成 **SMOMobile-shell.ipa**，完全不含游戏内容。
+- 手动选择 `personal`，使用私有输入中的本体 NSP、1.4.1 升级 NSP 和 Actions Secret `SMO_PROD_KEYS`。
+- **SMOMobile-1.4.1.ipa** 包含用户自己的游戏程序及加载表，仅上传私有存储仓库；RomFS 和游戏着色器单独输出。
 
-1. fork 或新建仓库，把本仓库推上去；
-2. Actions 页面手动触发 `build shell ipa`，或推一个 tag（`v*`）自动出 Release；
-3. 下载 `SMOMobile-shell.ipa`，用 Sideloadly / AltStore 之类工具**用你自己的 Apple ID 签名**后装到 iPhone。
-
-免费 Apple ID 也能签：签名 7 天过期（到期重签重装即可，存档不丢），最多 3 台设备、每台 3 个 App。
-
-### 路线 B：本机构建 iOS 包
-
-需要有 Apple 芯片的 Mac 与 Xcode（`xcodebuild`）。云端路线就是这条路线的自动化版本。
-
-### 路线 C：不需要 Xcode 的出包（把内容塞进壳里）
-
-跟参考项目一样：云端只出**不含任何游戏内容的空壳**，你在自己机器上把游戏文件塞进去：
-
-```
-python3 smo/tools/smom_pack.py <壳.ipa> <你的游戏文件目录> <输出.ipa>     # （工具待建）
-```
-
-### 准备游戏文件
-
-只能从你自己买的 Switch 版导出（见 [docs/GAME_FILES.md](docs/GAME_FILES.md)）。需要：
-
-- Program NCA 里的 **ExeFS**（`main` / `sdk` / `subsdk0` / `rtld` / `main.npdm`）
-- 同一 NCA 里的 **RomFS**
-
-`prod.keys` 用于解密你自己导出的包。
+安装个人 IPA 后，将资源包还原得到的 `romfs/`、`msl/` 和 `resource_manifest.json`
+复制进「文件 → 我的 iPhone → SMO Mobile」。纯壳只能检查资源；运行游戏需要个人 IPA。
+构建配置、资源分片还原和本地命令见 [安装说明](docs/README_INSTALL.md)。
+新的 nxnative 路径与旧版运行时分开验收，真机结果以对应构建报告和日志为准。
 
 ## 支持哪些设备
 
@@ -147,7 +132,7 @@ python3 smo/tools/smom_pack.py <壳.ipa> <你的游戏文件目录> <输出.ipa>
 | iPhone 17 Pro Max（A19，本项目的主要目标） | 目标设备 |
 | iPhone 15 Pro 及以后的 A17 Pro 机型 | 预期可跑（与参考项目的验证档同级） |
 | A16 及更早（iPhone 14 系列、iPhone 15/15 Plus） | 参考项目在这一档需要额外的 ASTC 贴图包；本项目尚未处理 |
-| iPad | 本移植只针对 iPhone |
+| iPad（iPadOS 26+） | 已生成通用应用包，真机游玩待验收 |
 
 ## 目录
 

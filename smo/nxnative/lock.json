@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/seedds/nxnative.git",
+  "commit": "19d7a70ad18586f6816204c1ad9271a769996a34",
+  "title_id": "0100000000010000",
+  "package": "v393216",
+  "game_version": "1.4.1",
+  "bundle_id": "com.example.smomobile",
+  "display_name": "SMO Mobile",
+  "minimum_ios": "26.0"
+}

@@ -344,6 +344,10 @@ def test_shader_fixtures():
     constants = shader_fixture.bindings("test", 1, "", metadata)
     check("compiler constants retain exact bytes", constants["arguments"][0]["kind"] == "constant" and
           constants["constant_data"] == "00112233" and "nvn_slot" not in constants["arguments"][0])
+    metadata["resources"].pop("constant_data")
+    empty_c1 = shader_fixture.bindings("test", 1, "", metadata)
+    check("c1 无常数段仍按常数处理（运行时读全 0）", empty_c1["arguments"][0]["kind"] == "constant" and
+          "constant_data" not in empty_c1 and "nvn_slot" not in empty_c1["arguments"][0])
     metadata = {"resources": {"sbufs": [{"binding": i, "cb_slot": 0, "cb_offset": offset}
                   for i, offset in enumerate((0x110 // 4, 0x510 // 4, 3))]},
                 "spirv": {"ssbos": [{"name": "s" + str(i), "binding": i} for i in range(3)]},

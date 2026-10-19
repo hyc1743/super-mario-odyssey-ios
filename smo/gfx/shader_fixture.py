@@ -66,7 +66,9 @@ def bindings(key, stage, source, metadata):
         # c0..c2 are driver/constant banks and must not use this mapping.
         if kind == "cbuf" and 3 <= resource.get("slot", -1) <= 16:
             argument["nvn_slot"] = resource["slot"] - 3
-        if kind == "cbuf" and resource.get("slot") == 1 and "constant_data" in resources:
+        # c1 = 着色器常数段（参考实现的 NVN_RB_C1）：c1.bin 存在时嵌入真数据；不存在时
+        # 运行时读全 0（参考实现 zero_bank，其全库 600 份长 0）。不再要求 constant_data。
+        if kind == "cbuf" and resource.get("slot") == 1:
             argument["kind"] = "constant"
         if kind == "sbuf" and resource.get("cb_slot") == 0 and stage in (1, 5):
             base = 0x110 if stage == 1 else 0x510

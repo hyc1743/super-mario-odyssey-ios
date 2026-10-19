@@ -88,6 +88,24 @@ static int stencil_pixel_format(MTLPixelFormat f) {
     default:return 0;
     }
 }
+/* Ryujinx 翻译器给着色器注入的合成常量缓冲（support_buffer，参考实现 NVN_RB_SUPPORT 同款）。
+ * 布局照参考实现实测：alpha_test u32@0、is_bgra u32[8]@16、viewport_inverse f4@144、
+ * viewport_size f4@160、frag_scale_count i32@176、render_scale float4[73]@192（取 .x）。
+ * SMO 全库只读 render_scale[0].x（本地 134 处），按参考默认填：缩放 1.0、BGRA 互换 0、其余 0。 */
+static id<MTLBuffer> support_buffer_for(id<MTLDevice> device) {
+    static __strong id<MTLBuffer> buffer;
+    if(!buffer){
+        buffer=[device newBufferWithLength:65536 options:MTLResourceStorageModeShared];
+        if(buffer)for(int i=0;i<73;i++)*((float *)buffer.contents+48+4*i)=1.0f;   /* offset 192 字节 */
+    }
+    return buffer;
+}
+/* c1 = 着色器自带常数段；游戏没提供（c1.bin 长 0）时读全 0 —— 参考实现的 zero_bank。 */
+static id<MTLBuffer> zero_bank_for(id<MTLDevice> device) {
+    static __strong id<MTLBuffer> buffer;
+    if(!buffer)buffer=[device newBufferWithLength:65536 options:MTLResourceStorageModeShared];
+    return buffer;
+}
 uint64_t nvn_metal_render_generation(NSObject *state,const nvn_resource_snapshot *r) {
     return ((SMORenderState *)state).drawGenerations[target_identity(r)].unsignedLongLongValue;
 }
@@ -230,19 +248,23 @@ static SMOMetalShader *load_shader(SMOGuestEncoder *e,const nvn_shader_ent *entr
     }
     SMOMetalShader *result=[SMOMetalShader new];result.function=function;result.bindings=bindings;
     result.cacheKey=cacheKey;result.depthMode=depthMode;result.sourceEntry=*entry;
-    for(NSDictionary *arg in bindings[@"arguments"])if([arg[@"kind"] isEqualToString:@"constant"]){
+    for(NSDictionary *arg in bindings[@"arguments"])
+        if([arg[@"kind"] isEqualToString:@"constant"] ||
+           ([arg[@"kind"] isEqualToString:@"cbuf"] && [arg[@"slot"] intValue]==1)){
         NSString *hex=bindings[@"constant_data"];
-        if(![hex isKindOfClass:NSString.class] || hex.length>131072 || hex.length%2)return nil;
+        if(hex!=nil && (![hex isKindOfClass:NSString.class] || hex.length>131072 || hex.length%2))return nil;
         result.constants=[e.device newBufferWithLength:65536 options:MTLResourceStorageModeShared];
         if(!result.constants)return nil;
-        uint8_t *bytes=result.constants.contents;
-        for(NSUInteger i=0;i<hex.length/2;i++){
-            unsigned value=0;
-            for(unsigned j=0;j<2;j++){
-                unichar c=[hex characterAtIndex:i*2+j];unsigned n=c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:16;
-                if(n>15)return nil;value=value*16+n;
+        if(hex){
+            uint8_t *bytes=result.constants.contents;
+            for(NSUInteger i=0;i<hex.length/2;i++){
+                unsigned value=0;
+                for(unsigned j=0;j<2;j++){
+                    unichar c=[hex characterAtIndex:i*2+j];unsigned n=c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:16;
+                    if(n>15)return nil;value=value*16+n;
+                }
+                bytes[i]=(uint8_t)value;
             }
-            bytes[i]=(uint8_t)value;
         }
         break;
     }
@@ -470,6 +492,24 @@ static int arguments_for(SMOGuestEncoder *e,SMOMetalShader *shader,unsigned stag
             [e.render useResource:shader.constants usage:MTLResourceUsageRead stages:stage==0?MTLRenderStageVertex:MTLRenderStageFragment];
             continue;
         }
+        if([kind isEqualToString:@"support"]){
+            /* 合成 support_buffer（见 support_buffer_for）：不来自游戏绑定，宿主填默认值。
+             * 真机 v0.6.19：×457 NVN_METAL_BINDING_UNRESOLVED name=support_buffer —— 整类绘制被丢。 */
+            id<MTLBuffer> buffer=support_buffer_for(e.device);
+            if(!buffer)return reject("support buffer allocation");
+            [encoder setBuffer:buffer offset:0 atIndex:aid];
+            [e.render useResource:buffer usage:MTLResourceUsageRead stages:stage==0?MTLRenderStageVertex:MTLRenderStageFragment];
+            continue;
+        }
+        if([kind isEqualToString:@"cbuf"] && [arg[@"slot"] intValue]==1){
+            /* c1 = 着色器常数段（参考实现 NVN_RB_C1）：有 c1.bin 用真数据，没有读全 0。
+             * 真机 v0.6.19：×44 fp_c1 / ×14 vp_c1 未解析 —— 全部走「读 0」。 */
+            id<MTLBuffer> buffer=shader.constants ?: zero_bank_for(e.device);
+            if(!buffer)return reject("shader constant bank");
+            [encoder setBuffer:buffer offset:0 atIndex:aid];
+            [e.render useResource:buffer usage:MTLResourceUsageRead stages:stage==0?MTLRenderStageVertex:MTLRenderStageFragment];
+            continue;
+        }
         /* Maxwell bank numbers and texture instruction immediates are not NVN
          * binding slots. Metadata must carry a verified conversion explicitly. */
         if(!arg[@"nvn_slot"]){
@@ -692,6 +732,11 @@ static int compute_arguments(SMOGuestEncoder *e,id<MTLComputeCommandEncoder> enc
             if(!driver)return reject("compute driver bank");
             [arguments setBuffer:driver offset:0 atIndex:aid];
             [encoder useResource:driver usage:MTLResourceUsageRead];
+        }else if([kind isEqualToString:@"support"]){
+            id<MTLBuffer> buffer=support_buffer_for(e.device);
+            if(!buffer)return reject("compute support buffer");
+            [arguments setBuffer:buffer offset:0 atIndex:aid];
+            [encoder useResource:buffer usage:MTLResourceUsageRead];
         }else if([kind isEqualToString:@"cbuf"] || [kind isEqualToString:@"sbuf"]){
             int slot=[arg[@"nvn_slot"] intValue];if(!arg[@"nvn_slot"] || slot<0 || slot>=32)return reject("compute buffer slot");
             int storage=[kind isEqualToString:@"sbuf"];

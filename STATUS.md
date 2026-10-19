@@ -2496,3 +2496,26 @@ depthAttachmentPixelFormat MTLPixelFormatRG11B10Float is not depth renderable.'
 
 回归测试（macOS CI 可验）：`metal_render_selftest` 新增深度附件守卫用例 ——
 RG11B10F 当深度目标 + 画颜色 → 不崩溃、颜色照画；DEPTH32F + ClearDepthStencil → 正常。
+
+### 同一轮的第二波：×457 support_buffer / ×44 fp_c1 / ×14 vp_c1 绑定未解析（黑屏主因之一）
+
+`NVN_METAL_BINDING_UNRESOLVED` 三类名字合计 515 条 —— 对应绘制全部被丢，与 235 条管线早退
+一起构成游戏世界黑屏。对照参考实现（`work/reference-d2r/dm/gfx/nvn/nvn_mtl.m`）找到真相：
+**这两类都不是游戏绑定的缓冲**：
+
+- `support_buffer` = Ryujinx 翻译器注入的**合成常量缓冲**（参考实现 NVN_RB_SUPPORT），
+  布局：alpha_test u32@0、is_bgra u32[8]@16、viewport_inverse f4@144、viewport_size f4@160、
+  frag_scale_count i32@176、render_scale float4[73]@192。SMO 全库只读 render_scale[0].x
+  （本地 134 处，`gl_FragCoord / render_scale`）→ 按参考默认填：缩放 1.0、其余 0
+- `fp_c1` / `vp_c1` = 着色器自带常数段 c1（参考实现 NVN_RB_C1）：「c1 长 0（全库 600 份）
+  而着色器仍声明：读 0」—— 参考实现绑 zero_bank（64 KB 全 0）；有 c1.bin 的 40 份嵌入真数据
+
+修法（运行时不用重新生成随包数据，直接对当前 device 存档生效）：
+1. `nvn_metal_render`：`arguments_for` 新增 kind=support（绑宿主填默认值的 64 KB 缓冲）与
+   cbuf+slot=1（绑 shader.constants，缺常数段时绑 zero_bank）两条路径；计算路径同样支持 support
+2. `load_shader`：常数段缓冲改为「有 constant_data 填真数据、没有建全 0」——不再因为
+   缺 constant_data 而判 shader 缺失
+3. `shader_fixture`：cbuf slot=1 一律标 kind=constant（不再要求 constant_data）；
+   `selftest.py` 增加「c1 无常数段仍按常数处理」断言（本机 全部通过）
+4. `metal_render_selftest`：测试着色器加 support（乘 render_scale）与 c1（加零）两个实参 ——
+   支撑缓冲没绑或没填 1.0 会直接黑屏，测试立刻失败

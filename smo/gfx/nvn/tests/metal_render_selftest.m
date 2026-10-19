@@ -70,13 +70,14 @@ int main(void) {
         FILE *index=fopen(idx.fileSystemRepresentation,"wb");assert(index);
         NSString *vs=@"#include <metal_stdlib>\nusing namespace metal;\nstruct Input{float2 p[[attribute(0)]];};\nvertex float4 main0(Input v[[stage_in]]){return float4(v.p,-0.5,1);}\n";
         NSString *depthClipVS=@"#include <metal_stdlib>\nusing namespace metal;\nstruct Input{float2 p[[attribute(0)]];};\nvertex float4 main0(Input v[[stage_in]]){return float4(v.p,0.25,1);}\n";
-        NSString *fs=@"#include <metal_stdlib>\nusing namespace metal;\nstruct A{constant float4 *color[[id(0)]];texture2d<float> image[[id(1)]];sampler smp[[id(2)]];constant float *scale[[id(3)]];device float *factor[[id(4)]];};\nfragment float4 main0(constant A &a[[buffer(0)]]){return *a.color*a.image.sample(a.smp,float2(0.5))*(*a.scale)*(*a.factor);}\n";
+        NSString *fs=@"#include <metal_stdlib>\nusing namespace metal;\nstruct S{float4 _m0;float4 _m1[8];float4 _m2;float4 _m3;int _m4;float4 _m5[73];};\nstruct A{constant float4 *color[[id(0)]];texture2d<float> image[[id(1)]];sampler smp[[id(2)]];constant float *scale[[id(3)]];device float *factor[[id(4)]];constant float4 *c1[[id(5)]];constant S *sup[[id(6)]];};\nfragment float4 main0(constant A &a[[buffer(0)]]){return (*a.color)*a.image.sample(a.smp,float2(0.5))*(*a.scale)*(*a.factor)*(*a.sup)._m5[0].x+(*a.c1)[1].x;}\n";
         write_shader(root,index,memory+page*7,7,1,vs,@[],@[@{@"location":@0,@"type":@"vec2"}],depthClipVS);
         write_shader(root,index,memory+page*7+512,19,5,fs,@[
             @{@"id":@0,@"kind":@"cbuf",@"nvn_slot":@0},
             @{@"id":@1,@"kind":@"texture",@"nvn_slot":@0,@"array":@1,@"separate":@NO},
             @{@"id":@2,@"kind":@"sampler",@"nvn_slot":@0,@"array":@1,@"separate":@NO},
-            @{@"id":@3,@"kind":@"constant"},@{@"id":@4,@"kind":@"sbuf",@"nvn_slot":@0}],@[],nil);
+            @{@"id":@3,@"kind":@"constant"},@{@"id":@4,@"kind":@"sbuf",@"nvn_slot":@0},
+            @{@"id":@5,@"kind":@"cbuf",@"slot":@1},@{@"id":@6,@"kind":@"support"}],@[],nil);
         fclose(index);nvn_shader_reset();assert(nvn_shader_load(idx.fileSystemRepresentation)==2);
         uint64_t guestDevice[8]={0};assert(nvn_st_new(guestDevice,1));
         C(ProgramInitialize,&program,P(guestDevice),0,0,0,0);nvn_shader_data shaders[2]={{P(memory+page*7),NULL},{P(memory+page*7+512),NULL}};

@@ -28,6 +28,10 @@ int main(void) {
         NSString *path = [root stringByAppendingPathComponent:@"resource_manifest.json"];
         [[NSJSONSerialization dataWithJSONObject:manifest options:0 error:nil] writeToFile:path atomically:YES];
         NSCAssert(SMOCheckResources(root, expected, nil, nil) == nil, @"Matching complete resources must pass");
+        NSString *cache = [root stringByAppendingPathComponent:@"verified-cache.plist"];
+        NSCAssert(SMOCheckResources(root, expected, cache, nil) == nil, @"A complete package populates the verification cache");
+        NSCAssert([fm fileExistsAtPath:cache], @"Verification cache is written");
+        NSCAssert(SMOCheckResources(root, expected, cache, nil) == nil, @"Unchanged resources pass cached verification");
         NSMutableDictionary *wrong = [expected mutableCopy]; wrong[@"game_version"] = @"v0";
         NSCAssert(SMOCheckResources(root, wrong, nil, nil) != nil, @"Wrong version must fail");
         wrong = [expected mutableCopy]; wrong[@"shader_chain"] = @"old";
@@ -39,6 +43,9 @@ int main(void) {
         NSString *shader = [root stringByAppendingPathComponent:@"msl/b-0123456789ab/shader_b.metallib"];
         [[@"corrupt!" dataUsingEncoding:NSUTF8StringEncoding] writeToFile:shader atomically:YES];
         NSCAssert(SMOCheckResources(root, expected, nil, nil) != nil, @"Same-size corruption must fail");
+        NSCAssert(SMOCheckResources(root, expected, cache, nil) != nil, @"Replacing a cached file forces a new checksum");
+        [data writeToFile:shader atomically:YES];
+        NSCAssert(SMOCheckResources(root, expected, cache, nil) == nil, @"Recopying a damaged file recovers without reinstalling");
         [fm removeItemAtPath:shader error:nil];
         NSCAssert(SMOCheckResources(root, expected, nil, nil) != nil, @"Incomplete copy must fail");
         [fm removeItemAtPath:root error:nil];

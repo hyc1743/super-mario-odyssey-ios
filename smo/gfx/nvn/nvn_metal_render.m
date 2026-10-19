@@ -77,14 +77,20 @@ static NSString *target_identity(const nvn_resource_snapshot *r) {
 static int depth_pixel_format(MTLPixelFormat f) {
     switch(f){
     case MTLPixelFormatDepth16Unorm:case MTLPixelFormatDepth32Float:
-    case MTLPixelFormatDepth32Float_Stencil8:case MTLPixelFormatDepth24Unorm_Stencil8:return 1;
+    case MTLPixelFormatDepth32Float_Stencil8:return 1;
+#if !defined(__IPHONE_OS_VERSION_MIN_REQUIRED)
+    case MTLPixelFormatDepth24Unorm_Stencil8:return 1;   /* iOS 无 D24S8 */
+#endif
     default:return 0;
     }
 }
 static int stencil_pixel_format(MTLPixelFormat f) {
     switch(f){
-    case MTLPixelFormatStencil8:case MTLPixelFormatX24_Stencil8:case MTLPixelFormatX32_Stencil8:
-    case MTLPixelFormatDepth32Float_Stencil8:case MTLPixelFormatDepth24Unorm_Stencil8:return 1;
+    case MTLPixelFormatStencil8:case MTLPixelFormatX32_Stencil8:
+    case MTLPixelFormatDepth32Float_Stencil8:return 1;
+#if !defined(__IPHONE_OS_VERSION_MIN_REQUIRED)
+    case MTLPixelFormatX24_Stencil8:case MTLPixelFormatDepth24Unorm_Stencil8:return 1;   /* iOS 无 D24S8 */
+#endif
     default:return 0;
     }
 }

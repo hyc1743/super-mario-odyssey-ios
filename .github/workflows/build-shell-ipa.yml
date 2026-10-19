@@ -121,19 +121,18 @@ jobs:
             --discard-runner-inputs --output "$RUNNER_TEMP/nxnative-personal" \
             > "$RUNNER_TEMP/nxnative-personal/build-console.log" 2>&1 &
           build_pid=$!
-          heartbeat=0
-          while kill -0 "$build_pid" 2>/dev/null; do
-            echo "Personal build running in $GITHUB_REPOSITORY. Detailed logs remain in private release storage."
-            heartbeat=$((heartbeat + 1))
-            if [ "$((heartbeat % 10))" -eq 0 ]; then
-              python scripts/nxnative_github.py --private-repo "$PRIVATE_STORAGE_REPO" publish --logs-only \
-                --directory "$RUNNER_TEMP/nxnative-personal" --tag "nxnative-${{ github.run_id }}" \
-                > "$RUNNER_TEMP/nxnative-progress-upload.log" 2>&1 || true
-            fi
-            sleep 30
-          done
+          (
+            while kill -0 "$build_pid" 2>/dev/null; do
+              echo "Personal build running in $GITHUB_REPOSITORY. Detailed logs remain in private release storage."
+              sleep 30
+            done
+          ) &
+          heartbeat_pid=$!
           wait "$build_pid"
-          exit $?
+          build_rc=$?
+          kill "$heartbeat_pid" 2>/dev/null || true
+          wait "$heartbeat_pid" 2>/dev/null || true
+          exit "$build_rc"
       - name: Store personal output in the private release repository
         env:
           SMO_PRIVATE_TOKEN: ${{ secrets.SMO_PRIVATE_TOKEN }}

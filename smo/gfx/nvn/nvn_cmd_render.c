@@ -28,6 +28,19 @@ void nvn_CommandBufferSetRenderTargets(NVNcommandBuffer *c, int count,
     p->count=count;
     for (int i=0;i<count;++i) attachment(&p->colors[i],colors?colors[i]:NULL,views?views[i]:NULL);
     attachment(&p->depth,depth,depth_view);
+    /* Keep the first few target bindings in the device log.  Odyssey's
+     * main pass is RG11B10 color + Depth32Float_Stencil8; this catches an
+     * ABI/view mismatch before Metal turns it into a misleading black frame. */
+    static _Atomic unsigned rt_diag;
+    if (atomic_fetch_add(&rt_diag, 1) < 8) {
+        NVN_LOG("NVN_SET_RT count=%d color0=%#llx fmt=%llu depth=%#llx fmt=%llu color_view=%d depth_view=%d",
+            count,
+            count ? (unsigned long long)p->colors[0].object : 0,
+            count && p->colors[0].object ? (unsigned long long)p->colors[0].words[5] : 0,
+            (unsigned long long)p->depth.resource.object,
+            p->depth.resource.object ? (unsigned long long)p->depth.resource.words[5] : 0,
+            count && p->colors[0].has_view, p->depth.has_view);
+    }
 }
 void nvn_CommandBufferClearColor(NVNcommandBuffer *c, int index, const float *rgba, int mask) {
     if (index<0 || index>=8 || !rgba || (mask&~15)) NVN_DIE("invalid ClearColor");

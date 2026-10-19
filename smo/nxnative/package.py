@@ -55,6 +55,38 @@ def validate_build(exefs, expected):
             raise ValueError(f"{module}: NSO Build ID does not match {LOCK['game_version']}")
 
 
+def validate_shader_libraries(msl, profile, chain):
+    """Only Odyssey's upstream geometry shaders may be absent from a release."""
+    expected, geometry = set(), set()
+    for line in (profile / "shader_map.tsv").read_text(encoding="utf-8").splitlines():
+        columns = line.split("\t")
+        if len(columns) < 5 or not (columns[0].endswith(".bin") or columns[0].startswith("main.rodata@")):
+            continue
+        expected.add(columns[3])
+        if columns[0].startswith("gs_"):
+            geometry.add(columns[3])
+    if not expected:
+        raise ValueError("The profile has no shader records")
+    directory = Path(msl) / ("b-" + chain)
+    missing = set()
+    for key in expected:
+        library, reflection = directory / (key + "_b.metallib"), directory / (key + "_b.json")
+        if not library.is_file() or not reflection.is_file():
+            missing.add(key)
+            continue
+        with library.open("rb") as stream:
+            if stream.read(4) != b"MTLB":
+                raise ValueError("Invalid Metal library: " + key)
+        record = json.loads(reflection.read_text(encoding="utf-8"))
+        if record.get("chain") != chain:
+            raise ValueError("Metal reflection chain mismatch: " + key)
+    unexpected = missing - geometry
+    if unexpected:
+        raise ValueError(f"Missing {len(unexpected)} required shader libraries/reflections: {', '.join(sorted(unexpected)[:8])}")
+    return {"total": len(expected), "ready": len(expected - missing), "failed": len(missing),
+            "known_missing_geometry": sorted(missing), "unexpected_missing": []}
+
+
 class PartWriter(io.RawIOBase):
     """A non-seekable ZIP sink; never keeps a whole archive or part in memory."""
     def __init__(self, root, prefix, limit=PART_BYTES):

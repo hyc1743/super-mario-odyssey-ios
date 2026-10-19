@@ -13,7 +13,6 @@ import json
 import os
 from pathlib import Path
 import plistlib
-import re
 import shutil
 import subprocess
 import sys
@@ -23,7 +22,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "smo/nxnative"))
 sys.path.insert(0, str(ROOT / "smo/verify"))
-from package import LOCK, identity, json_bytes, sha256, validate_build, write_resources
+from package import LOCK, identity, json_bytes, sha256, validate_build, validate_shader_libraries, write_resources
 from check_thin_ipa import inspect
 
 
@@ -224,12 +223,7 @@ def build(args):
                 # records; point it at the merged 1.4.1 module explicitly.
                 env["MAIN"] = str(extracted / "ExeFS/main")
                 ios = upstream.build_shaders(sys.executable, source, sh, xlate, env, work / "logs", profile)
-                shader_text = (work / "logs/dmsh_build.log").read_text(encoding="utf-8", errors="replace")
-                counts = re.search(r"着色器 (\d+)：成功 (\d+)", shader_text)
-                shader_report = {"ios_libraries": len(list((ios / ("b-" + expected["shader_chain"])).glob("*_b.metallib")))}
-                if counts:
-                    total, ready = map(int, counts.groups())
-                    shader_report.update(total=total, ready=ready, failed=total - ready)
+                shader_report = validate_shader_libraries(ios, source / "dm/games" / LOCK["title_id"], expected["shader_chain"])
                 run([sys.executable, source / "dm/gfx/tools/c1_guard.py", sh / "cache" / ("b-" + expected["shader_chain"]),
                      profile.table("c1_full.tsv")], env=env, log=work / "logs/c1-guard.log")
                 shutil.copy2(source / "dm/gfx/tools/dmsh_chain.lock", out / "shader-toolchain.lock")

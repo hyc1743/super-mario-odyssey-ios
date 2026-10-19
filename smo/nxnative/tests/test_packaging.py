@@ -11,7 +11,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "smo/nxnative"))
 sys.path.insert(0, str(ROOT / "smo/verify"))
-from package import LOCK, PartWriter, json_bytes, restore_resources, sha256, validate_build, write_resources
+from package import LOCK, PartWriter, json_bytes, restore_resources, sha256, validate_build, validate_shader_libraries, write_resources
 from check_thin_ipa import inspect
 
 
@@ -152,6 +152,27 @@ class PackagingTests(unittest.TestCase):
         base = self.root / "base.nsp"; base.write_bytes(b"PFS0")
         with self.assertRaisesRegex(ValueError, "update-nsp"):
             module.personal_inputs(SimpleNamespace(base_nsp=base, update_nsp=None, keys=None))
+
+    def test_shader_release_only_allows_the_known_geometry_gap(self):
+        romfs, msl, expected = self.resources()
+        profile = self.root / "profile"; profile.mkdir()
+        (profile / "shader_map.tsv").write_text("vs_data.bin\t0\tvertex\texample\t/source\ngs_data.bin\t0\tgeometry\tgeometry\t/source\n")
+        record = msl / "b-test/example_b.json"
+        record.write_bytes(json_bytes({"chain": "test"}))
+        report = validate_shader_libraries(msl, profile, "test")
+        self.assertEqual(report["ready"], 1)
+        self.assertEqual(report["known_missing_geometry"], ["geometry"])
+        record.unlink()
+        with self.assertRaisesRegex(ValueError, "Missing 1 required"):
+            validate_shader_libraries(msl, profile, "test")
+
+    def test_shader_release_rejects_old_reflection_chain(self):
+        _, msl, _ = self.resources()
+        profile = self.root / "profile"; profile.mkdir()
+        (profile / "shader_map.tsv").write_text("ps_data.bin\t0\tfragment\texample\t/source\n")
+        (msl / "b-test/example_b.json").write_bytes(json_bytes({"chain": "old"}))
+        with self.assertRaisesRegex(ValueError, "chain mismatch"):
+            validate_shader_libraries(msl, profile, "test")
 
     def test_github_redirect_does_not_send_credentials_to_storage(self):
         import urllib.request

@@ -110,11 +110,12 @@ flowchart LR
 ## 构建
 
 统一入口为 `python scripts/build_nxnative_ipa.py --mode shell|personal`。
-GitHub Actions 的 `build nxnative ipa` 使用 macOS/Xcode 构建，Windows 用户无需本地 Mac。
+GitHub Actions 的 `build nxnative ipa` 在**当前公共仓库**使用 macOS/Xcode 构建，Windows 用户无需本地 Mac。
+私有仓库仅存储输入、个人产物和日志，不运行 Actions。
 
 - 提交、PR 和默认手动构建只生成 **SMOMobile-shell.ipa**，完全不含游戏内容。
 - 手动选择 `personal`，使用私有输入中的本体 NSP、1.4.1 升级 NSP 和 Actions Secret `SMO_PROD_KEYS`。
-- **SMOMobile-1.4.1.ipa** 包含用户自己的游戏程序及加载表，仅上传私有构建仓库；RomFS 和游戏着色器单独输出。
+- **SMOMobile-1.4.1.ipa** 包含用户自己的游戏程序及加载表，仅上传私有存储仓库；RomFS 和游戏着色器单独输出。
 
 安装个人 IPA 后，将资源包还原得到的 `romfs/`、`msl/` 和 `resource_manifest.json`
 复制进「文件 → 我的 iPhone → SMO Mobile」。纯壳只能检查资源；运行游戏需要个人 IPA。

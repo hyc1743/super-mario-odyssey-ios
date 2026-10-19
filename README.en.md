@@ -96,10 +96,12 @@ flowchart LR
 ## Building
 
 The current pipeline uses pinned nxnative sources and base + update **1.4.1**.
+Both modes run on hosted macOS runners in the public source repository. The
+private repository stores inputs, personal outputs and logs; it runs no Actions.
 Run the `build nxnative ipa` GitHub Actions workflow. Its default `shell` mode
 produces a public IPA with no game content. Manual `personal` builds fetch
 user-owned NSPs from a private release and keys from `SMO_PROD_KEYS`, then publish
-the personal IPA and separate resource parts only to the private build repository.
+the personal IPA and separate resource parts only to the private storage repository.
 Restore the parts with `scripts/restore_nxnative_resources.py`, then copy `romfs/`,
 `msl/` and `resource_manifest.json` into the app's Documents. The personal IPA
 contains the rewritten game program; the public shell only checks resources.

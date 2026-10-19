@@ -8,10 +8,14 @@
 
 当前工作流：`.github/workflows/build-shell-ipa.yml`，名称 `build nxnative ipa`。
 
-| 模式 | 触发 | 输出 |
+**两种模式均在公共仓库 `hyc1743/super-mario-odyssey-ios` 的 GitHub-hosted macOS runner 构建。**
+私有仓库 `hyc1743/super-mario-odyssey-ios-build` 仅存放 NSP 分片、个人 IPA、资源包和日志，
+不启动 Actions，不消耗私有仓库的构建分钟数。工作流在私有仓库中会跳过执行。
+
+| 模式 | 执行位置及触发 | 输出存储 |
 | --- | --- | --- |
-| shell | main 提交、PR、tag、手动 | 公开 artifact 中的 `SMOMobile-shell.ipa`，不含游戏程序、着色器、素材或游戏图标 |
-| personal | 仅手动选择 personal | 私有仓库 release：`SMOMobile-1.4.1.ipa`、资源分片、还原工具、构建报告 |
+| shell | 公共仓库：main 提交、PR、tag、手动 | 公开 artifact 中的 `SMOMobile-shell.ipa`，不含游戏程序、着色器、素材或游戏图标 |
+| personal | 公共仓库：仅手动选择 personal | 私有仓库 release：`SMOMobile-1.4.1.ipa`、资源分片、还原工具、构建报告 |
 
 个人包保留游戏程序和加载表，以便正常签名执行。素材和编译后着色器不进入任何新个人 IPA。
 纯壳只能显示说明与检查资源，无法仅复制 ExeFS 后运行游戏。
@@ -28,7 +32,7 @@ python scripts/nxnative_github.py prepare-inputs `
 
 上传工具读取 `SMO_PRIVATE_TOKEN`、`GH_TOKEN` 或 Git Credential Manager 的凭据，不打印密钥。
 NSP 分片存放在私有 release `nxnative-inputs-1.4.1`；断点重跑可复用已上传的内容分片。
-Actions → `build nxnative ipa` → Run workflow → mode=`personal`。
+在公共仓库进入 Actions → `build nxnative ipa` → Run workflow → mode=`personal`。
 结果位于私有仓库的 `nxnative-<run id>` release；公开 Actions 不上传个人产物或详细日志。
 
 ## 安装与复制资源

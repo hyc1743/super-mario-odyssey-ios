@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'shell: public shell only; personal: also build a private 1.4.1 IPA and external resources'
+        description: 'Build in this public repository: shell only, or personal 1.4.1 IPA with external resources'
         type: choice
         options: [shell, personal]
         default: shell
@@ -23,6 +23,9 @@ permissions:
 jobs:
   verify:
     name: Package boundaries and portable resource tools
+    # All macOS work runs in the public source repository. The private
+    # repository is release storage only and never runs this workflow.
+    if: github.event.repository.private == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -73,13 +76,13 @@ jobs:
           if-no-files-found: ignore
 
   personal:
-    name: Private personal IPA and external resources
+    name: Public macOS build (personal IPA and external resources)
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'personal'
     needs: verify
     runs-on: macos-26
     timeout-minutes: 180
     env:
-      PRIVATE_REPO: hyc1743/super-mario-odyssey-ios-build
+      PRIVATE_STORAGE_REPO: hyc1743/super-mario-odyssey-ios-build
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -90,6 +93,7 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Build dependencies
         run: |
+          echo "Build execution repository: $GITHUB_REPOSITORY (public). Private repository is file storage only."
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
           df -h "$RUNNER_TEMP"
@@ -102,7 +106,7 @@ jobs:
           SMO_PROD_KEYS: ${{ secrets.SMO_PROD_KEYS }}
           INPUT_TAG: ${{ inputs.input_tag }}
         run: |
-          python scripts/nxnative_github.py --private-repo "$PRIVATE_REPO" fetch-inputs \
+          python scripts/nxnative_github.py --private-repo "$PRIVATE_STORAGE_REPO" fetch-inputs \
             --input-tag "$INPUT_TAG" --destination "$RUNNER_TEMP/nxnative-inputs"
       - name: Build personal IPA and external resource parts
         run: |
@@ -121,11 +125,11 @@ jobs:
           done
           wait "$build_pid"
           exit $?
-      - name: Publish personal output to the private build repository
+      - name: Store personal output in the private release repository
         env:
           SMO_PRIVATE_TOKEN: ${{ secrets.SMO_PRIVATE_TOKEN }}
         run: |
-          python scripts/nxnative_github.py --private-repo "$PRIVATE_REPO" publish \
+          python scripts/nxnative_github.py --private-repo "$PRIVATE_STORAGE_REPO" publish \
             --directory "$RUNNER_TEMP/nxnative-personal" --tag "nxnative-${{ github.run_id }}"
       - name: Publish private build logs
         if: always()
@@ -133,7 +137,7 @@ jobs:
           SMO_PRIVATE_TOKEN: ${{ secrets.SMO_PRIVATE_TOKEN }}
         run: |
           mkdir -p "$RUNNER_TEMP/nxnative-personal"
-          python scripts/nxnative_github.py --private-repo "$PRIVATE_REPO" publish --logs-only \
+          python scripts/nxnative_github.py --private-repo "$PRIVATE_STORAGE_REPO" publish --logs-only \
             --directory "$RUNNER_TEMP/nxnative-personal" --tag "nxnative-${{ github.run_id }}"
       - name: Remove temporary keys
         if: always()

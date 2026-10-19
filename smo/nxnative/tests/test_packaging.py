@@ -131,6 +131,16 @@ class PackagingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "update-nsp"):
             module.personal_inputs(SimpleNamespace(base_nsp=base, update_nsp=None, keys=None))
 
+    def test_github_redirect_does_not_send_credentials_to_storage(self):
+        import urllib.request
+        spec = importlib.util.spec_from_file_location("nxnative_github", ROOT / "scripts/nxnative_github.py")
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        request = urllib.request.Request("https://api.github.com/repos/test/test", headers={"Authorization": "Bearer test"})
+        redirected = module.GitHubRedirect().redirect_request(request, None, 302, "Found", {}, "https://storage.example/file?sig=test")
+        self.assertIsNone(redirected.get_header("Authorization"))
+        same_host = module.GitHubRedirect().redirect_request(request, None, 302, "Found", {}, "https://api.github.com/another")
+        self.assertEqual(same_host.get_header("Authorization"), "Bearer test")
+
 
 if __name__ == "__main__":
     unittest.main()

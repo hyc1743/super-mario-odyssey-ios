@@ -64,7 +64,8 @@ NSString *SMOCheckResources(NSString *documents, NSDictionary *expected, NSStrin
         NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:path error:nil];
         if (![attributes[NSFileType] isEqual:NSFileTypeRegular] || ![attributes[NSFileSize] isEqual:row[@"bytes"]])
             return [NSString stringWithFormat:@"Missing or incomplete file: %@. Copy it again from the restored resource package.", name];
-        NSDictionary *stamp = @{@"bytes": row[@"bytes"], @"mtime": @([attributes[NSFileModificationDate] timeIntervalSince1970]), @"sha256": hash};
+        NSDictionary *stamp = @{@"bytes": row[@"bytes"], @"mtime": @([attributes[NSFileModificationDate] timeIntervalSince1970]),
+                               @"created": @([attributes[NSFileCreationDate] timeIntervalSince1970]), @"sha256": hash};
         if (![cached[name] isEqual:stamp] && ![digestFile(path) isEqual:hash])
             return [NSString stringWithFormat:@"Checksum failed: %@. Restore and copy this file again.", name];
         verified[name] = stamp;

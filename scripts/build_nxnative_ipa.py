@@ -220,6 +220,9 @@ def build(args):
                 sh = work / "shader"
                 upstream.split_shaders(sys.executable, source, [extracted / "RomFS"], [extracted / "ExeFS/main"],
                                        sh / "pkg", env, work / "logs", profile)
+                # dmsh_build can also extract embedded main.rodata shader
+                # records; point it at the merged 1.4.1 module explicitly.
+                env["MAIN"] = str(extracted / "ExeFS/main")
                 ios = upstream.build_shaders(sys.executable, source, sh, xlate, env, work / "logs", profile)
                 shader_text = (work / "logs/dmsh_build.log").read_text(encoding="utf-8", errors="replace")
                 counts = re.search(r"着色器 (\d+)：成功 (\d+)", shader_text)

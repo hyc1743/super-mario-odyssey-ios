@@ -236,7 +236,12 @@ id<MTLTexture> nvn_metal_texture(id<MTLDevice> device,const nvn_resource_snapsho
         else if(storage>pool->v[2]-w[10])why="storage beyond pool";
         else if(pool->v[1]>UINT64_MAX-pool->v[2])why="pool address overflow";
         else if(p.compressed&&render_target)why="compressed as render target";
-        else if(p.depth&&!render_target)why="depth only as render target";
+        /* Depth textures are valid shader-read resources as well as render
+         * targets.  The old guard rejected every non-render-target access to
+         * Depth32Float (NVN format 0x34 / decimal 52).  Super Mario Odyssey
+         * samples its depth buffer in post-processing passes, so that guard
+         * turned an otherwise valid texture into nil, which then caused the
+         * Metal render pipeline to be skipped and left the display black. */
         else if(w[8]>1&&(!render_target||![device supportsTextureSampleCount:(NSUInteger)w[8]]))why="sample count";
         else if(p.compressed==2&&(l.dims!=2||![device supportsFamily:MTLGPUFamilyApple1]))why="astc constraints";
         if(why){

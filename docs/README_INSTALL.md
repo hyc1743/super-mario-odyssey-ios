@@ -34,6 +34,7 @@ python scripts/nxnative_github.py prepare-inputs `
 NSP 分片存放在私有 release `nxnative-inputs-1.4.1`；断点重跑可复用已上传的内容分片。
 在公共仓库进入 Actions → `build nxnative ipa` → Run workflow → mode=`personal`。
 结果位于私有仓库的 `nxnative-<run id>` release；公开 Actions 不上传个人产物或详细日志。
+构建期间公开日志只显示阶段和数量；每 5 分钟将详细日志快照保存到同名私有 release，便于诊断长时间首次着色器编译。
 
 ## 安装与复制资源
 
@@ -92,3 +93,4 @@ python smo/verify/check_thin_ipa.py <personal.ipa> --policy personal
 `env.txt` 支持 nxnative 参数，例如 `DM_LANG=zh-Hans`。
 应用校验完成后固定资源路径，配置文件不会把游戏文件切到未校验目录。
 标题、进入关卡、触控/手柄、声音和长时间运行需用户侧载后分别验收。
+上游 1.4.1 包含 3 个不能由现有翻译链编译的几何着色器（雷电效果）；构建报告保留成功和失败数量，不将其计为全量着色器通过。

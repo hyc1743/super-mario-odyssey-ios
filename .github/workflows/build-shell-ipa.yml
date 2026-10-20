@@ -101,6 +101,12 @@ jobs:
           brew install xcodegen zstd spirv-cross
           xcodebuild -downloadComponent MetalToolchain
           python -m pip install lz4 capstone fonttools
+      - name: Boot adapter compile smoke test (fail fast, before the shader build)
+        run: |
+          xcrun --sdk iphoneos clang -fobjc-arc -fblocks -fmodules -fsyntax-only \
+            -Werror=implicit-function-declaration -Werror=incompatible-pointer-types \
+            -target arm64-apple-ios18.0 -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            -Ismo/nxnative smo/nxnative/SMOResources.m smo/nxnative/main.m
       - name: Fetch private user-owned inputs
         env:
           SMO_PRIVATE_TOKEN: ${{ secrets.SMO_PRIVATE_TOKEN }}

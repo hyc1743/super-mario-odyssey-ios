@@ -75,7 +75,7 @@ NSString *SMOCheckResources(NSString *documents, NSDictionary *expected, NSStrin
             return [NSString stringWithFormat:@"Missing or incomplete file: %@. Copy it again from the restored resource package.", name];
         NSDictionary *stamp = @{@"bytes": row[@"bytes"], @"mtime": @([attributes[NSFileModificationDate] timeIntervalSince1970]),
                                @"created": @([attributes[NSFileCreationDate] timeIntervalSince1970]), @"sha256": hash};
-        if (![cached[name] isEqual:stamp] && ![digestFile(path) isEqual:hash])
+        if (![cached[name] isEqual:stamp] && ![SMOFileDigest(path) isEqual:hash])
             return [NSString stringWithFormat:@"Checksum failed: %@. Restore and copy this file again.", name];
         verified[name] = stamp;
         hasMarker |= [name isEqualToString:@"romfs/SoundData/SeResourceStd2nd.aras"];

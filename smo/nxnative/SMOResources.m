@@ -9,7 +9,7 @@ static NSString *digestData(NSData *data) {
     return hex;
 }
 
-static NSString *digestFile(NSString *path) {
+NSString *SMOFileDigest(NSString *path) {
     NSInputStream *stream = [NSInputStream inputStreamWithFileAtPath:path];
     [stream open];
     CC_SHA256_CTX ctx; CC_SHA256_Init(&ctx);

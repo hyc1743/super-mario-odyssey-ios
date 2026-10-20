@@ -65,14 +65,39 @@ void front_ios_boot(void) {
     self.message.text = @"Checking resources / 正在校验资源…\nFiles → On My iPhone → SMO Mobile\nromfs/ + msl/ + resource_manifest.json";
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         BOOL personal = [g_identity[@"package_kind"] isEqual:@"personal"];
-        NSString *cache = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES)[0]
-                           stringByAppendingPathComponent:@"smo-verified-resources.plist"];
-        NSString *error = g_identity ? SMOCheckResources(g_documents, g_identity, cache, ^(NSUInteger n, NSUInteger total) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                self.message.text = [NSString stringWithFormat:@"Verifying resources / 正在校验资源\n%lu / %lu", (unsigned long)n, (unsigned long)total];
-            });
-        }) : @"The app's package identity is missing. Reinstall the IPA.";
-        if (!personal) error = [NSString stringWithFormat:@"Pure shell / 纯壳版本\nInstall your personal IPA, then copy the resource folders.\n请安装个人 IPA，再复制资源目录。\n\n%@", error ?: @"Resources verified / 资源校验通过"];
+        NSString *manifestPath = [g_documents stringByAppendingPathComponent:@"resource_manifest.json"];
+        NSString *manifestHash = SMOFileDigest(manifestPath);
+        NSString *markerPath = [g_documents stringByAppendingPathComponent:@"save/smo-verified-resources.plist"];
+        NSDictionary *marker = [NSDictionary dictionaryWithContentsOfFile:markerPath];
+        const char *recheckEnv = getenv("SMO_RECHECK");
+        BOOL recheck = recheckEnv && recheckEnv[0] == '1';
+        // Personal builds verify the full resource set once, then trust a marker
+        // in Documents/save that records the manifest hash and build identity.
+        // The marker survives overwrite installs; changed resources (different
+        // manifest) or a forced SMO_RECHECK=1 in env.txt trigger one fresh check.
+        BOOL alreadyVerified = personal && !recheck && manifestHash &&
+            [marker[@"manifest"] isEqual:manifestHash] &&
+            [marker[@"chain"] isEqual:g_identity[@"shader_chain"]] &&
+            [marker[@"commit"] isEqual:g_identity[@"nxnative_commit"]];
+        NSString *error = nil;
+        if (alreadyVerified) {
+            fprintf(stderr, "boot: resources already verified; skipping re-check\n");
+        } else {
+            NSString *cache = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES)[0]
+                               stringByAppendingPathComponent:@"smo-verified-resources.plist"];
+            error = g_identity ? SMOCheckResources(g_documents, g_identity, cache, ^(NSUInteger n, NSUInteger total) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    self.message.text = [NSString stringWithFormat:@"Verifying resources / 正在校验资源\n%lu / %lu", (unsigned long)n, (unsigned long)total];
+                });
+            }) : @"The app's package identity is missing. Reinstall the IPA.";
+            if (!personal) error = [NSString stringWithFormat:@"Pure shell / 纯壳版本\nInstall your personal IPA, then copy the resource folders.\n请安装个人 IPA，再复制资源目录。\n\n%@", error ?: @"Resources verified / 资源校验通过"];
+            if (!error && personal) {
+                NSDateFormatter *stamp = [NSDateFormatter new];
+                stamp.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+                [@{@"manifest": manifestHash, @"chain": g_identity[@"shader_chain"], @"commit": g_identity[@"nxnative_commit"],
+                   @"verified_at": [stamp stringFromDate:NSDate.date]} writeToFile:markerPath atomically:YES];
+            }
+        }
         if (error) {
             fprintf(stderr, "boot: %s\n", error.UTF8String);
             dispatch_async(dispatch_get_main_queue(), ^{ self.message.text = error; self.check.enabled = YES; });
@@ -87,7 +112,7 @@ void front_ios_boot(void) {
         setenv("DM_FONT_DIR", [dm stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 1);
         g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation);
         dm_host_preload_start(2, g_argv);
-        fprintf(stderr, "boot: matching 1.4.1 resources verified; starting nxnative\n");
+        fprintf(stderr, "boot: resources %s; starting nxnative\n", alreadyVerified ? "already verified (skipped re-check)" : "verified");
         dispatch_async(dispatch_get_main_queue(), ^{ g_ready = YES; self.view.window.rootViewController = front_ios_root(); });
     });
 }

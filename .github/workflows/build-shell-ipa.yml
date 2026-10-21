@@ -1,474 +1,141 @@
-# 在 GitHub 云端出包：不需要 Mac，不需要 Xcode。
-#
-# 两个 job：
-#   selftest   Linux：跑 smo/tools/selftest.py（不需要任何游戏文件），保证工具链没被改坏
-#   shell-ipa  macOS：用 runner 自带的 Xcode 构建 App 壳，产出**未签名 IPA** 作为 artifact；
-#              打 tag 时自动挂到 Release 上
-#
-# 为什么 macOS runner 就够：参考项目是在 Apple 芯片的 Mac 上用 xcodebuild 出包的，
-# GitLab/GitHub 的 macOS runner 正好提供这台机器（含 Xcode 与 Metal 工具链），
-# 于是「没有 Mac」不再是障碍。
-#
-# 拿到 IPA 之后：用 Sideloadly / AltStore 之类工具，用你自己的 Apple ID 签名再装到 iPhone。
-# 免费 Apple ID 也能签（签名 7 天过期，到期重签重装；最多 3 台设备、每台 3 个 App）。
-name: build shell ipa
+name: build nxnative ipa
 
 on:
-  workflow_dispatch:
   push:
     branches: [main]
     tags: ['v*']
   pull_request:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Build in this public repository: shell only, or personal 1.4.1 IPA with external resources'
+        type: choice
+        options: [shell, personal]
+        default: shell
+      input_tag:
+        description: 'Private input release tag'
+        default: nxnative-inputs-1.4.1
+        type: string
 
 permissions:
-  contents: write          # 打 tag 时创建 Release 需要
+  contents: read
 
 jobs:
-  selftest:
-    name: 工具链自检（不需要游戏文件）
+  verify:
+    name: Package boundaries and portable resource tools
+    # All macOS work runs in the public source repository. The private
+    # repository is release storage only and never runs this workflow.
+    if: github.event.repository.private == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: 装依赖
-        run: pip install -r requirements.txt
-      - name: 自检（Yaz0 / SARC / NSO 头 / 改写器端到端）
-        run: |
-          python3 smo/tools/selftest.py
-          python3 smo/tools/build_ipa_selftest.py
-          python3 smo/verify/check_thin_ipa_selftest.py
-          python3 smo/ios/tools/package_installable_selftest.py
-          python3 smo/ios/tools/check_ios_contract.py
-      - name: 造合成改写产物（装载器自检用；真产物是游戏内容，不能进 CI）
-        run: python3 smo/tools/make_synthetic_artifacts.py work/synthetic
-      - name: 编宿主里平台无关的那部分（含自动生成的接管表）
-        run: |
-          gcc -O2 -Wall -Wextra -Werror -c -o /tmp/hle.o smo/host/hle.c -Ismo/host
-          gcc -O2 -Wall -Wextra -Werror -c -o /tmp/hf.o smo/host/hle_force_gen.c -Ismo/host
-      # 10 个 C 单测（装载器 / svc / 线程 / fs / oe+hid / NVN 接口层 / 状态层 / 着色器索引 /
-      # 重放记账 / 纹理块线性布局）。
-      #
-      # 走 Makefile，不再在这里手写 gcc 命令行。原因：这些步骤原先各自抄一份文件清单，
-      # 加重放层时 hle_nvn.c 多了一处 nvn_replay_call，只有 replay 那一步的清单跟着改了 ——
-      # 另外两步从 2026-10-14 起就链不上（undefined reference），而本地 `make test` 也一样挂。
-      # 两边各有一份会漂移的清单，等于没有一份是准的。现在 Makefile 是唯一来源，
-      # 共同依赖写在 GFX_COMMON 里，本机与 CI 跑的是同一条命令。
-      - name: C 单测（10 个，走 Makefile 保证与本机一致）
-        run: |
-          set -o pipefail
-          make -C smo/host test CC=gcc PY=python3 2>&1 | tee -a /tmp/selftests.log
-      - name: 规范式 BC 参考解码器自检（内容核对的判据必须先证明自己对）
-        run: python3 smo/gfx/tools/bc_spec_ref.py --selftest 2>&1 | tee -a /tmp/selftests.log
-      - name: 检查 nvn.h 抽出的枚举与头一致（Metal 翻译要用这些数值）
-        run: python3 smo/gfx/nvn_enum.py --check 2>&1 | tee -a /tmp/selftests.log
-      - name: 三段内嵌出包：生成 + 校验（拼回原映像）
-        # pipefail：原来没有，`| tee` 会吞掉 gen_embed 的退出码 —— 出包脚本拒绝了也照样绿
-        run: |
-          set -o pipefail
-          python3 smo/ios/tools/gen_embed.py work/synthetic work/embed_syn.S sdk main 2>&1 | tee -a /tmp/selftests.log
-          python3 smo/ios/tools/check_embed.py work/embed_syn.S 2>&1 | tee -a /tmp/selftests.log
-      - name: 三段切分：边界页归代码段，有重定位的模块必须被拒（iOS 没有 RWX 页）
-        # 合成产物的 data 已挪到 16K 之后（与真实模块一致），应当通过；
-        # 再造一个「data 紧跟代码、落在边界页里」的反例，出包脚本必须拒绝 —— 检查能报错才算检查。
-        run: |
-          set -o pipefail
-          python3 smo/ios/tools/x0_layout.py work/synthetic sdk main 2>&1 | tee -a /tmp/selftests.log
-          python3 smo/ios/tools/x0_layout_selftest.py 2>&1 | tee -a /tmp/selftests.log
-      - name: 图形入口必须在接管清单里（否则游戏拿不到任何 NVN 函数）
-        run: |
-          if ! grep -q 'nvnBootstrapLoader' smo/host/hle_force_gen.c; then
-            echo '::error::接管清单里没有 nvnBootstrapLoader'; exit 1;
-          fi
-          echo '图形入口在接管清单里（抢在 sdk 自己的实现之前）'
-      - name: x18 不变量检查（改写产物里不能有指令写通用 x18）
-        run: python3 smo/tools/check_x18.py work/synthetic
-      - name: 检查生成物与名字表一致（NVN 表与记录桩）
-        run: |
-          python3 smo/tools/gen_nvn.py --check
-          python3 smo/tools/gen_nvn_records.py --check
-      - name: 检查自动生成的接管表与 import 清单一致
-        run: python3 smo/tools/gen_hle_force.py --check
-      - name: NVN 不透明性检查器的自检（确认它能抓到反例，不只会报「通过」）
-        # 这一项在 CI 里跑得到：它用手工编码的指令序列，不需要游戏文件。
-        # nvn_opaque_check.py 本身需要 main.bin（游戏内容），所以只能在本机跑。
-        run: python3 smo/verify/nvn_opaque_selftest.py 2>&1 | tee -a /tmp/selftests.log
-      - name: 失败时把单测日志发成注解
-        # ubuntu job 的输出同样要能被读到（运行日志要管理员权限，注解是公开的）
-        if: failure()
-        run: |
-          for f in /tmp/selftests.log; do
-            [ -f "$f" ] || continue
-            echo "===== $f 尾部 ====="
-            tail -40 "$f"
-            tail -25 "$f" | while IFS= read -r l; do echo "::error::[单测] $l"; done
-          done
+      - run: python -m unittest discover -s smo/nxnative/tests -v
 
-  shell-ipa:
-    name: 构建 App 壳 → 未签名 IPA
-    runs-on: macos-latest
-    # 私有仓 token（可选）：给了就能在这台**公开 runner**（免费）上出「内嵌版」——
-    # 输入包从私有仓拉、成品 IPA 传回私有仓 release；公开 artifact 永远只留空壳。
-    # 放在 job 级 env：step 的 if 不能直接引用 secrets，但能引用 env。
-    env:
-      SMO_PRIVATE_TOKEN: ${{ secrets.SMO_PRIVATE_TOKEN }}
-      PRIVATE_REPO: hyc1743/super-mario-odyssey-ios-build
+  shell:
+    name: Public shell (no game inputs)
+    if: github.event_name != 'workflow_dispatch' || inputs.mode == 'shell'
+    needs: verify
+    runs-on: macos-26
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: 工具版本
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build dependencies
         run: |
-          sw_vers
-          uname -m
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
-      - name: Metal 探测（runner 有没有可用 GPU —— 决定 Metal 层能不能在 CI 上验）
+          df -h "$RUNNER_TEMP"
+          brew install xcodegen
+          python -m pip install fonttools
+      - name: Native resource validator regression tests
         run: |
-          set -o pipefail
-          xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation \
-              -o /tmp/metal_probe smo/ios/tools/metal_probe.m
-          /tmp/metal_probe
-      - name: Metal 重放层第一片（清屏 → 回读；离屏可验）+ 合龙点（记录流 → 帧）
-        run: |
-          if ! xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation               -Ismo/gfx/nvn -Ismo/host -o /tmp/mtl_selftest smo/gfx/nvn/nvn_mtl.m smo/gfx/nvn/tests/mtl_selftest.c               > /tmp/mtl_build.log 2>&1; then
-            echo "::error::[mtl 编译] 失败"
-            tail -20 /tmp/mtl_build.log | while IFS= read -r l; do echo "::error::[mtl 编译] $l"; done
-            exit 1
-          fi
-          /tmp/mtl_selftest > /tmp/mtl.log 2>&1
-          rc=$?
-          cat /tmp/mtl.log
-          if [ $rc -ne 0 ]; then
-            echo "::error::[exit code] mtl_selftest = $rc"
-            tail -15 /tmp/mtl.log | while IFS= read -r l; do echo "::error::[mtl] $l"; done
-            exit 1
-          fi
-          if ! make -C smo/host mtl_replay_selftest CC=clang > /tmp/mtl2_build.log 2>&1; then
-            echo "::error::[mtl 合龙 编译] 失败"
-            tail -20 /tmp/mtl2_build.log | while IFS= read -r l; do echo "::error::[mtl 合龙 编译] $l"; done
-            exit 1
-          fi
-          smo/host/mtl_replay_selftest > /tmp/mtl2.log 2>&1
-          rc=$?
-          cat /tmp/mtl2.log
-          if [ $rc -ne 0 ]; then
-            echo "::error::[exit code] mtl_replay_selftest = $rc"
-            tail -15 /tmp/mtl2.log | while IFS= read -r l; do echo "::error::[mtl 合龙] $l"; done
-            exit 1
-          fi
-      - name: macOS：逐个 C 单测（每个失败立刻进注解，不依赖日志文件）
-        run: |
-          set -o pipefail
-          TARGETS="cmd_selftest queue_selftest cmd_render_selftest render_state_selftest resources_selftest metal_queue_selftest metal_resources_selftest metal_render_selftest metal_compute_selftest applogic_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest embed_selftest gate_stack_selftest"
-          if ! make -C smo/host $TARGETS PY=python3 > /tmp/build.log 2>&1; then
-            echo "::error::[macOS] 单测编译/链接失败"
-            tail -25 /tmp/build.log | while IFS= read -r l; do echo "::error::[macOS 编译] $l"; done
-            exit 1
-          fi
-          args_of() {
-            case "$1" in
-              loader_selftest) echo "work/synthetic sdk main";;
-              embed_selftest)  echo "work/synthetic/sdk.patched.bin";;
-              *) echo "";;
-            esac
-          }
-          fail=0
-          # embed_selftest 分段跑：它在 CI 上曾以 SIGBUS 崩在中途，分段能把崩溃定位到节。
-          # 注意：失败必须计入 fail —— 曾经只打注解不设 fail，job 绿了但段其实挂了（教训）
-          for step in 1 2 3 4 5 6; do
-            if ./smo/host/embed_selftest $step > /tmp/embed_step$step.log 2>&1; then
-              echo "::notice::[macOS] embed_selftest step=$step 通过"
-            else
-              echo "::error::[exit code] embed_selftest step=$step = $?"
-              tail -10 /tmp/embed_step$step.log | while IFS= read -r l; do echo "::error::[embed step=$step] $l"; done
-              fail=1
-            fi
-          done
-          for t in $TARGETS; do
-            [ "$t" = embed_selftest ] && continue          # 上面已分段跑过
-            log=/tmp/$t.log
-            # 每个单测限时（GPU 卡死时不至于把整个 job 挂到 6 小时）；macOS 没有 GNU timeout，用 perl alarm
-            if perl -e 'alarm shift; exec @ARGV' 300 ./smo/host/$t $(args_of $t) > $log 2>&1; then
-              echo "::notice::[macOS] $t 通过（$(grep -c '✅' $log) 条断言）"
-            else
-              rc=$?
-              # 退出码是关键信息：139=SIGSEGV、138=SIGBUS、134=SIGABRT、134/非 0 各不同
-              echo "::error::[exit code] $t = $rc (log lines: $(wc -l < $log))"
-              cat $log | while IFS= read -r l; do echo "::error::[macOS $t] $l"; done
-              # 用 macOS 自带的 lldb 抓回溯（「无输出崩溃」只有这个能定位）。无条件跑：判据本身也可能崩。
-              perl -e 'alarm shift; exec @ARGV' 300 xcrun lldb -b -o "run" -o "bt 12" -- ./smo/host/$t $(args_of $t) > /tmp/lldb.log 2>&1 || true
-              tail -26 /tmp/lldb.log | while IFS= read -r l; do echo "::error::[lldb $t] $l"; done
-              fail=1
-            fi
-          done
-          SMO_AUDIO_TEST_WAV="$RUNNER_TEMP/smo-audio-selftest.wav" ./smo/host/audio_selftest
-          python3 smo/verify/check_audio_wav.py "$RUNNER_TEMP/smo-audio-selftest.wav"
-          exit $fail
-      - name: 编译宿主（macOS：entry.S / thread.c / loader_apple.c / main.c 的真实检查）
-        run: |
-          set -o pipefail
-          make -C smo/host smo_host 2>&1 | tee smo/host/build.log
-      - name: 装 xcodegen（生成 .xcodeproj）
-        run: brew install xcodegen
-      - name: 注入游戏程序（内嵌路线；三个输入来源按优先级）
-        # 输入来源：
-        #   ① 仓内 `input/embed-input.zip`（私有仓专用：把输入包提交进你自己的私有仓）
-        #   ② 私有仓（PRIVATE_REPO）的 `embed-input` 分支上的同一路径，用 SMO_PRIVATE_TOKEN 经 API 拉 ——
-        #      公开仓这边只在 runner 上取一次内容：不落 git、不进公开 artifact。
-        #      为什么单开一个分支：这样私有仓的 main 与公开仓逐字节一致，输入包不会随 main 推出去。
-        #   ③ 仓库变量 GUEST_URL（可选带 GUEST_SHA256 校验），带 token 下载
-        if: ${{ vars.GUEST_URL != '' || hashFiles('input/embed-input.zip') != '' || env.SMO_PRIVATE_TOKEN != '' }}
-        env:
-          GUEST_URL: ${{ vars.GUEST_URL }}
-          GUEST_SHA256: ${{ vars.GUEST_SHA256 }}
-        run: |
-          set -o pipefail
-          Z=/tmp/embed-input.zip
-          rm -f "$Z"
-          if [ -f input/embed-input.zip ]; then
-            cp input/embed-input.zip "$Z"
-            echo "输入来源：仓内 input/embed-input.zip"
-          elif [ -n "${SMO_PRIVATE_TOKEN:-}" ]; then
-            curl -sS -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
-                 -H "Accept: application/vnd.github.raw+json" \
-                 "https://api.github.com/repos/$PRIVATE_REPO/contents/input/embed-input.zip?ref=embed-input" \
-                 -o "$Z"
-            echo "输入来源：私有仓 $PRIVATE_REPO"
-          else
-            curl -sL -H "Authorization: Bearer ${{ github.token }}"                  -H "Accept: application/octet-stream" "$GUEST_URL" -o "$Z"
-            echo "输入来源：GUEST_URL"
-          fi
-          # 三种来源都可能是「一段 JSON 错误体」而不是 zip，所以统一在这里验头部
-          head -c 2 "$Z" | grep -q "PK" || { echo "::error::拿到的不是 zip（来源/权限不对）"; head -c 200 "$Z"; exit 1; }
-          echo "字节数：$(wc -c < "$Z")"
-          if [ -n "${GUEST_SHA256:-}" ]; then
-            GOT=$(python3 -c "import hashlib;print(hashlib.sha256(open('$Z','rb').read()).hexdigest())")
-            [ "$GOT" = "$GUEST_SHA256" ] || { echo "::error::输入包校验失败：期望 $GUEST_SHA256 实得 $GOT"; exit 1; }
-            echo "输入包校验通过（sha256 ${GOT:0:16}…）"
-          fi
-          python3 smo/ios/tools/embed_inject.py "$Z" .
-          # 后面的「上传到哪」按这个开关分流（公开 artifact vs 私有 release）
-          echo "SMO_INJECTED=1" >> "$GITHUB_ENV"
-      - name: 真实 ARM64 游戏启动检查（通过后才出包）
-        if: env.SMO_INJECTED == '1'
-        timeout-minutes: 4
-        run: |
-          set -o pipefail
-          make -C smo/host smo_host_embedded
-          python3 smo/tools/prepare_shared_fonts.py smo/ios/Resources/SharedFonts
-          export SMO_FONT_DIR="$PWD/smo/ios/Resources/SharedFonts"
-          export SMO_SHADER_CAPTURE_DIR=/tmp/smo-private-shader-capture
-          export SMO_FRAME_CAPTURE_DIR=/tmp/smo-private-frame-capture
-          mkdir -p "$SMO_SHADER_CAPTURE_DIR"
-          BOOT_ARGS=()
-          if [ -n "${SMO_PRIVATE_TOKEN:-}" ]; then
-            curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
-              -H "Accept: application/vnd.github.raw+json" \
-              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-romfs.zip?ref=527b041e45f7a9d584432287e7862a4d0f1760aa" \
-              -o /tmp/boot-romfs.zip
-            python3 - <<'PY'
-          import hashlib, zipfile
-          path = '/tmp/boot-romfs.zip'
-          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == '05419cd018e530bba47a5df4ff58ebc70a7042cf8dbda30ef871bf5678ca2551'
-          with zipfile.ZipFile(path) as archive:
-              archive.extractall('/tmp/smo-boot-romfs')
-          PY
-            # Separate private chunk keeps each Git blob below 100 MiB. Include
-            # existing literal ObjectData paths from this game build in one pass.
-            curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
-              -H "Accept: application/vnd.github.raw+json" \
-              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-objectdata.zip?ref=3012ecc50d7ee8e4ca526f2e033a624b46ada8b2" \
-              -o /tmp/boot-objectdata.zip
-            python3 - <<'PY'
-          import hashlib, zipfile
-          path = '/tmp/boot-objectdata.zip'
-          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == 'ced0215b4d8ba7cabb0b5cede52d98346aabc3e4a7b8c56f9c9766de77ffecbd'
-          with zipfile.ZipFile(path) as archive:
-              archive.extractall('/tmp/smo-boot-romfs')
-          PY
-            curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
-              -H "Accept: application/vnd.github.raw+json" \
-              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-effects.zip?ref=7ea76748437f37fe04b6263ddcea3ff80401fc47" \
-              -o /tmp/boot-effects.zip
-            python3 - <<'PY'
-          import hashlib, zipfile
-          path = '/tmp/boot-effects.zip'
-          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == 'e67294786c2cff43785701e02d944f52db91fa61e36b64e025125c7a927a4126'
-          with zipfile.ZipFile(path) as archive:
-              archive.extractall('/tmp/smo-boot-romfs')
-          PY
-            BOOT_ARGS=(--romfs /tmp/smo-boot-romfs)
-            curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
-              -H "Accept: application/vnd.github.raw+json" \
-              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-audio-streams.zip?ref=8abbb07d7df9ee0feb687aa355f7717d53cc845b" \
-              -o /tmp/boot-audio-streams.zip
-            python3 - <<'PY'
-          import hashlib, zipfile
-          path = '/tmp/boot-audio-streams.zip'
-          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == 'd4e70395d7935b9336ce60967e2fe05ff225c1d71017ff3e810152778757fd30'
-          with zipfile.ZipFile(path) as archive:
-              archive.extractall('/tmp/smo-boot-romfs')
-          PY
-            curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
-              -H "Accept: application/vnd.github.raw+json" \
-              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-shaders.zip?ref=5fdd1aae1be923036e56c7a6a8098604984f1423" \
-              -o /tmp/boot-shaders.zip
-            python3 - <<'PY'
-          import hashlib, zipfile
-          path = '/tmp/boot-shaders.zip'
-          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == '97cfbed25e77df064fe0c564a7f56495f73d3f727c4e210d1f395e0e863c1951'
-          PY
-            # 计算着色器（smo/gfx/tools/compute/compute_fixture.py 的产物，alComputeShader 24 个核）
-            curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN"               -H "Accept: application/vnd.github.raw+json"               "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-compute-shaders.zip?ref=13e0b26152050b3f6de8f2dfe12ab691658a9c17"               -o /tmp/boot-compute-shaders.zip
-            python3 - <<'PY'
-          import hashlib
-          path = '/tmp/boot-compute-shaders.zip'
-          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == 'cc45cc03ffd70de91309b699b07bad1a8f236925f2f8a2dd3d0d7a67b705e5b6'
-          PY
-            python3 smo/ios/tools/prepare_runtime_shaders.py /tmp/boot-shaders.zip /tmp/smo-device-shaders --extra /tmp/boot-compute-shaders.zip
-            export SMO_SHADER_IDX=/tmp/smo-device-shaders/shaders.idx
-            export SMO_SHADER_DIR=/tmp/smo-device-shaders
-            export SMO_SHADER_BUNDLE=/tmp/smo-device-shaders/shaders.smoa
-          fi
-          python3 smo/verify/guest_boot_smoke.py smo/host/smo_host_embedded --seconds 60 --press-a-after 10 --press-a-count 2 "${BOOT_ARGS[@]}"
-      - name: Preserve unmatched shader evidence privately
-        if: ${{ always() && env.SMO_INJECTED == '1' && env.SMO_PRIVATE_TOKEN != '' }}
-        run: python3 smo/verify/upload_shader_capture.py
-      - name: Check iOS presentation sources
-        if: ${{ always() }}
-        run: |
-          xcrun -sdk iphoneos clang -fsyntax-only -fobjc-arc -target arm64-apple-ios26.0 \
-            -Ismo/host -Ismo/gfx/nvn smo/ios/Sources/SMOMetalView.m smo/ios/Sources/SMOTouchController.m \
-            smo/ios/Sources/SMOAudio.m smo/ios/Sources/SMOFramePacer.m smo/ios/Sources/main.m
-      - name: iOS frontend source check
-        if: ${{ always() }}
-        run: |
-          xcrun -sdk iphoneos clang -fsyntax-only -fobjc-arc -target arm64-apple-ios26.0 \
-            -Ismo/host -Ismo/gfx/nvn smo/ios/Sources/SMOMetalView.m smo/ios/Sources/SMOTouchController.m \
-            smo/ios/Sources/SMOAudio.m smo/ios/Sources/SMOFramePacer.m smo/ios/Sources/main.m
-      - name: Automatically validate captured game output before device packaging
-        if: env.SMO_INJECTED == '1'
-        run: |
-          python3 smo/verify/check_render_capture.py \
-            /tmp/smo-private-frame-capture/frame-latest.ppm \
-            work/boot-smoke/result.json
-      - name: 构建并打包
-        env:
-          # 分支推送时 github.ref_name 是分支名，tag 时是 tag；不再直接把 git SHA 当版本号塞进
-          # MARKETING_VERSION（CFBundleShortVersionString 只允许数字与点，脚本里会归化）。
-          # 分支构建用 0.1.<run号>：真机状态页第一行就能看出装的是哪一次构建，省得来回猜。
-          SMO_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('0.1.{0}', github.run_number) }}
-          SMO_DEBUG: 1            # 构建脚本 set -x：日志里能看出卡在哪一条命令
-        # 整段输出同时写文件：GitHub 的运行日志要管理员权限才能下载，
-        # 而 check-run 的 annotations 是公开可读的，所以失败时把日志尾部发成注解（见下一步）
-        run: |
-          set -o pipefail
-          if [ "${SMO_INJECTED:-}" = '1' ]; then export SMO_SHADER_ARCHIVE=/tmp/boot-shaders.zip SMO_SHADER_EXTRA=/tmp/boot-compute-shaders.zip; fi
-          bash smo/ios/shell_build.sh 2>&1 | tee smo/ios/out_step.log
-      - name: 上传薄 IPA 构建报告
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: SMOMobile-build-report
-          path: |
-            smo/ios/out/build_report.json
-            smo/ios/out/thin_ipa_report.json
-          if-no-files-found: warn
-      - name: 失败时把报错发成注解（错误行优先）
-        # 注释：这是维护者/协作方在拿不到仓库管理员权限时，唯一能直接看到真实报错的通道
-        if: failure()
-        run: |
-          for f in smo/host/build.log smo/ios/out_step.log smo/ios/out/xcodebuild.log; do
-            [ -f "$f" ] || { echo "::error::缺少 $f"; continue; }
-            echo "===== $f 尾部 ====="
-            tail -30 "$f"
-            echo "===== error 行 ====="
-            grep -nE "error:|error |Error:|No such file|command not found|Traceback|✗|✘|Specification|invalid" "$f" | head -12 | while IFS= read -r l; do echo "::error::$l"; done
-            tail -12 "$f" | while IFS= read -r l; do echo "::error::[尾] $l"; done
-          done
-      - name: 失败时把日志传上来
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: 构建日志
-          path: |
-            smo/host/build.log
-            smo/ios/out_step.log
-            smo/ios/out/xcodebuild.log
-            work/boot-smoke/guest.log
-            work/boot-smoke/backtrace.log
-            work/boot-smoke/result.json
-          if-no-files-found: warn
-      - name: 产物摘要
-        if: success()
-        run: |
-          ls -la smo/ios/out
-          unzip -l smo/ios/out/SMOMobile-shell.ipa | head -20
+          xcrun --sdk macosx clang -fobjc-arc -fblocks -Wno-deprecated-declarations \
+            -framework Foundation -Ismo/nxnative smo/nxnative/SMOResources.m \
+            smo/nxnative/tests/resources_test.m -o "$RUNNER_TEMP/resource-tests"
+          "$RUNNER_TEMP/resource-tests"
+      - name: Build without NSPs, keys or generated game data
+        run: python scripts/build_nxnative_ipa.py --mode shell --output out/nxnative-shell
       - uses: actions/upload-artifact@v4
-        # 内嵌版含游戏程序 —— **绝不**传成公开 artifact；只有空壳才传
-        if: env.SMO_INJECTED != '1'
         with:
-          name: SMOMobile-shell-ipa
-          path: smo/ios/out/SMOMobile-shell.ipa
+          name: SMOMobile-nxnative-shell
+          path: |
+            out/nxnative-shell/SMOMobile-shell.ipa
+            out/nxnative-shell/build_report.json
+            out/nxnative-shell/thin_ipa_report.json
           if-no-files-found: error
-      - name: 内嵌版 → 私有仓 release（公开仓只留空壳）
-        # 公开 runner 免费出包，成品只进私有仓。两种命名的区别：
-        #   tag 推送（v0.5.0）      → 私有仓也建同名 release（v0.5.0），资产叫 SMOMobile-0.5.0.ipa
-        #   分支推送（修 bug 时）   → 都进 build-latest，资产带 run 号与短 sha，方便对照哪次提交
-        if: env.SMO_INJECTED == '1' && env.SMO_PRIVATE_TOKEN != ''
+      - name: Shell build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nxnative-shell-build-logs
+          path: out/nxnative-shell/work/logs
+          if-no-files-found: ignore
+
+  personal:
+    name: Public macOS build (personal IPA and external resources)
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'personal'
+    needs: verify
+    runs-on: macos-26
+    timeout-minutes: 360
+    env:
+      PRIVATE_STORAGE_REPO: hyc1743/super-mario-odyssey-ios-build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build dependencies
         run: |
-          set -o pipefail
-          IPA=smo/ios/out/SMOMobile-shell.ipa
-          SHA7=$(echo "${{ github.sha }}" | cut -c1-7)
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            SMO_TAG="${{ github.ref_name }}"
-            NAME="SMOMobile-${SMO_TAG#v}.ipa"
-            TITLE="内嵌版 ${SMO_TAG}"
-          else
-            SMO_TAG=build-latest
-            NAME="SMOMobile-embed-r${{ github.run_number }}-${SHA7}.ipa"
-            TITLE="内嵌版构建（公开 runner）"
-          fi
-          API="https://api.github.com/repos/$PRIVATE_REPO"
-          UP="https://uploads.github.com/repos/$PRIVATE_REPO"
-          AUTH="Authorization: Bearer $SMO_PRIVATE_TOKEN"
-          REL_ID=$(curl -sS -H "$AUTH" "$API/releases/tags/$SMO_TAG" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("id",""))' 2>/dev/null || true)
-          if [ -z "$REL_ID" ]; then
-            echo "建 release $SMO_TAG"
-            REL_ID=$(curl -sS -X POST -H "$AUTH" -H "Content-Type: application/json" "$API/releases" \
-              -d "{\"tag_name\":\"$SMO_TAG\",\"name\":\"$TITLE\",\"prerelease\":true,\"body\":\"未签名 IPA，含游戏程序，仅本仓可见。下载 → 自签 → 覆盖安装。\"}" \
-              | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
-          fi
-          echo "release id = $REL_ID；上传 $NAME（$(wc -c < "$IPA") 字节）"
-          curl -sS --fail-with-body -X POST -H "$AUTH" -H "Content-Type: application/octet-stream" \
-               --data-binary @"$IPA" "$UP/releases/$REL_ID/assets?name=$NAME" -o /tmp/asset.json
-          python3 -c "import json;d=json.load(open('/tmp/asset.json'));print('已上传：',d.get('browser_download_url') or d)"
-      - name: 打 tag 时发 Release（内嵌版：只记版本，不附产物）
-        # 含游戏程序的包不发公开 release —— 它在上一步传到了私有仓。
-        # 这里仍然建 release：版本历史在公开仓能看全，别人也能知道这一版做过什么。
-        if: startsWith(github.ref, 'refs/tags/') && env.SMO_INJECTED == '1'
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          body: |
-            这一版的成品**自带游戏程序**（内嵌），所以**不放公开产物**：
-            未签名 IPA 在私有仓的 release 里（同一 tag），下载后用自己的证书自签安装。
-
-            本仓仍然不含任何游戏内容：仓库里没有游戏程序、着色器、美术、音频、文本或数据表，
-            公开 artifact 也是空的。构建时由私有仓的输入包临时提供，只在 runner 内存/临时磁盘上出现。
-      - name: 打 tag 时发 Release（空壳版：附 IPA）
-        if: startsWith(github.ref, 'refs/tags/') && env.SMO_INJECTED != '1'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: smo/ios/out/SMOMobile-shell.ipa
-          generate_release_notes: true
-          body: |
-            App 壳（未签名）。里面**不含任何游戏内容**：不含游戏程序、着色器、美术、音频、文本或数据表。
-
-            用法：
-            1. 下载 `SMOMobile-shell.ipa`
-            2. 用 Sideloadly / AltStore 等工具，用你自己的 Apple ID 签名后装到 iPhone（免费账号即可，7 天过期）
-            3. 安装后打开会看到一个状态页：它会列出移植进度，并检查游戏文件在不在
-
-            ⚠️ 这一版**还不能玩**：宿主（系统服务 HLE）与图形层（NVN→Metal）还没接上。
-            进度与依据见仓库的 STATUS.md。
+          echo "Build execution repository: $GITHUB_REPOSITORY (public). Private repository is file storage only."
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          df -h "$RUNNER_TEMP"
+          brew install xcodegen zstd spirv-cross
+          xcodebuild -downloadComponent MetalToolchain
+          python -m pip install lz4 capstone fonttools
+      - name: Boot adapter compile smoke test (fail fast, before the shader build)
+        run: |
+          xcrun --sdk iphoneos clang -fobjc-arc -fblocks -fmodules -fsyntax-only \
+            -Werror=implicit-function-declaration -Werror=incompatible-pointer-types \
+            -target arm64-apple-ios18.0 -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            -Ismo/nxnative smo/nxnative/SMOResources.m smo/nxnative/main.m
+      - name: Fetch private user-owned inputs
+        env:
+          SMO_PRIVATE_TOKEN: ${{ secrets.SMO_PRIVATE_TOKEN }}
+          SMO_PROD_KEYS: ${{ secrets.SMO_PROD_KEYS }}
+          INPUT_TAG: ${{ inputs.input_tag }}
+        run: |
+          python scripts/nxnative_github.py --private-repo "$PRIVATE_STORAGE_REPO" fetch-inputs \
+            --input-tag "$INPUT_TAG" --destination "$RUNNER_TEMP/nxnative-inputs"
+      - name: Build personal IPA and external resource parts
+        env:
+          SMO_PRIVATE_TOKEN: ${{ secrets.SMO_PRIVATE_TOKEN }}
+        run: |
+          python scripts/run_nxnative_ci.py --inputs "$RUNNER_TEMP/nxnative-inputs" \
+            --output "$RUNNER_TEMP/nxnative-personal" --private-repo "$PRIVATE_STORAGE_REPO" \
+            --tag "nxnative-${{ github.run_id }}"
+      - name: Store personal output in the private release repository
+        env:
+          SMO_PRIVATE_TOKEN: ${{ secrets.SMO_PRIVATE_TOKEN }}
+        run: |
+          python scripts/nxnative_github.py --private-repo "$PRIVATE_STORAGE_REPO" publish \
+            --directory "$RUNNER_TEMP/nxnative-personal" --tag "nxnative-${{ github.run_id }}"
+      - name: Publish private build logs
+        if: always()
+        env:
+          SMO_PRIVATE_TOKEN: ${{ secrets.SMO_PRIVATE_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/nxnative-personal"
+          python scripts/nxnative_github.py --private-repo "$PRIVATE_STORAGE_REPO" publish --logs-only \
+            --directory "$RUNNER_TEMP/nxnative-personal" --tag "nxnative-${{ github.run_id }}"
+      - name: Remove temporary keys
+        if: always()
+        run: rm -f "$RUNNER_TEMP/nxnative-inputs/prod.keys"

@@ -1,63 +1,98 @@
-# 薄 IPA 安装说明
+# nxnative IPA 构建与安装
 
-当前 Guest.framework 和 Metal 资源路径要求 iOS/iPadOS 26.0 或更高版本。
+使用固定 nxnative 提交 `19d7a70ad18586f6816204c1ad9271a769996a34`。
+首版仅支持《超级马里奥 奥德赛》本体加 1.4.1 升级 NSP（v393216）。
+安装目标为 iOS/iPadOS 26+；签名与安装由用户使用自己的侧载工具完成。
 
-## 1. 安装 IPA
+## GitHub 构建
 
-使用 Sideloadly、AltStore 或其他支持自签名的工具安装最终 IPA。只有 shell 调试时才直接安装 `SMOMobile-shell.ipa`；带本地 Guest.framework 的安装包可按下面命令生成。
+当前工作流：`.github/workflows/build-shell-ipa.yml`，名称 `build nxnative ipa`。
+
+**两种模式均在公共仓库 `hyc1743/super-mario-odyssey-ios` 的 GitHub-hosted macOS runner 构建。**
+私有仓库 `hyc1743/super-mario-odyssey-ios-build` 仅存放 NSP 分片、个人 IPA、资源包和日志，
+不启动 Actions，不消耗私有仓库的构建分钟数。工作流在私有仓库中会跳过执行。
+
+| 模式 | 执行位置及触发 | 输出存储 |
+| --- | --- | --- |
+| shell | 公共仓库：main 提交、PR、tag、手动 | 公开 artifact 中的 `SMOMobile-shell.ipa`，不含游戏程序、着色器、素材或游戏图标 |
+| personal | 公共仓库：仅手动选择 personal | 私有仓库 release：`SMOMobile-1.4.1.ipa`、资源分片、还原工具、构建报告 |
+
+个人包保留游戏程序和加载表，以便正常签名执行。素材和编译后着色器不进入任何新个人 IPA。
+纯壳只能显示说明与检查资源，无法仅复制 ExeFS 后运行游戏。
+
+维护者首次配置：现有 Secret `SMO_PRIVATE_TOKEN` 需要读取和写入
+`hyc1743/super-mario-odyssey-ios-build` 的 release。运行以下命令，将两个本人拥有的 NSP
+按 1 GiB 分片上传到该私有仓库，将密钥加密写入当前仓库的 `SMO_PROD_KEYS` Secret：
+
+```powershell
+python -m pip install pynacl
+python scripts/nxnative_github.py prepare-inputs `
+  --base-nsp "<本体.nsp>" --update-nsp "<1.4.1升级档.nsp>" --keys "<prod.keys>"
+```
+
+上传工具读取 `SMO_PRIVATE_TOKEN`、`GH_TOKEN` 或 Git Credential Manager 的凭据，不打印密钥。
+NSP 分片存放在私有 release `nxnative-inputs-1.4.1`；断点重跑可复用已上传的内容分片。
+在公共仓库进入 Actions → `build nxnative ipa` → Run workflow → mode=`personal`。
+结果位于私有仓库的 `nxnative-<run id>` release；公开 Actions 不上传个人产物或详细日志。
+构建期间公开日志只显示阶段和数量；每 5 分钟将详细日志快照保存到同名私有 release，便于诊断长时间首次着色器编译。
+
+## 安装与复制资源
+
+1. 下载并自行签名安装个人包 `SMOMobile-1.4.1.ipa`，打开一次以建立 Documents。
+2. 将同一私有 release 的所有 `SMO-Resources-1.4.1.zip.partNNN`、`resources-parts.json`、
+   `restore_nxnative_resources.py`、`package.py` 和 `lock.json` 下载到同一目录。
+3. 在该目录执行：
+
+```powershell
+python restore_nxnative_resources.py resources-parts.json SMO-Documents
+```
+
+也可在源码仓库中运行：
+
+```powershell
+python scripts/restore_nxnative_resources.py <下载目录>/resources-parts.json <输出目录>/SMO-Documents
+```
+
+工具逐片核对 SHA-256，校验 ZIP 中每个资源，最后写入完成清单。
+需要容纳临时 ZIP 和展开资源的磁盘空间。请保留全部分片直到还原成功。
+
+4. 将 `SMO-Documents` **里面的内容**复制进「文件 → 我的 iPhone → SMO Mobile」，不要多套一层目录。
+5. 打开应用。**首次启动自动完整校验一次**版本、着色器链和全部文件（几分钟），通过后在
+   `save/smo-verified-resources.plist` 写入标记并启动游戏；之后每次启动直接进入游戏，不再重复校验。
+   资源清单变化或删除该标记会重新完整校验一次；`Documents/env.txt` 加一行 `SMO_RECHECK=1` 可强制下次启动重检。
+
+完整校验期间复用与文件大小和修改时间绑定的缓存，只读资源、不写盘。
+应用缺文件或文件损坏时会显示具体路径，重新复制后可点“重新检查”。
+升级个人 IPA 后，使用对应 release 的资源包；不混用旧版 v0 资源和着色器。
+保持应用包名并保留应用数据覆盖安装；卸载会删除 Documents，操作前自行备份存档。
+
+## macOS 本地构建
+
+需要 Apple Silicon Mac、Xcode 26+、XcodeGen；个人构建另外需要 .NET 10、zstd、spirv-cross
+以及 Python `lz4`、`capstone`、`fonttools`。使用独立输出目录：
 
 ```bash
-python3 smo/ios/tools/package_installable.py \
-  --shell-ipa out/SMOMobile-shell.ipa \
-  --framework out/smo-phone-package/①放进App安装包/Frameworks/Guest.framework \
-  --output out/SMOMobile-installable.ipa
+python3 scripts/build_nxnative_ipa.py --mode shell --output out/nxnative-shell
+python3 scripts/build_nxnative_ipa.py --mode personal \
+  --base-nsp '<base.nsp>' --update-nsp '<update.nsp>' --keys '<prod.keys>' \
+  --output out/nxnative-personal
 ```
 
-也可以省略 `--framework`，脚本会从 `work/rewrite` 生成 Guest.framework：
+输出目录的 `work/` 是本机构建缓存，含本人游戏内容，不应公开。
+上游源码固定提交；构建会记录实际 Metal/spirv-cross 指纹，重建相应着色器链及配套清单。
+`build_report.json` 记录实际源码版本、Build ID、着色器链、IPA 校验结果和哈希；
+`shader-toolchain.lock` 保存编译工具指纹。真机测试不由打包成功代替。
+
+## 验证与诊断
 
 ```bash
-python3 smo/ios/tools/package_installable.py \
-  --shell-ipa out/SMOMobile-shell.ipa \
-  --rewrite work/rewrite \
-  --output out/SMOMobile-installable.ipa
+python -m unittest discover -s smo/nxnative/tests -v
+python smo/verify/check_thin_ipa.py <shell.ipa> --policy shell
+python smo/verify/check_thin_ipa.py <personal.ipa> --policy personal
 ```
 
-生成的 IPA 仍然不包含 RomFS/ExeFS；安装后继续复用 Documents 中的现有游戏资源。
-
-如果在 macOS 上从当前资源直接构建，统一入口为：
-
-```bash
-python3 smo/tools/build_ipa.py \
-  --resources work/game \
-  --game-version v0 \
-  --output out/ipa \
-  --build \
-  --installable \
-  --rewrite work/rewrite
-```
-
-## 2. 首次打开应用
-
-首次启动一次应用，让 iOS 在“文件”App 中创建 `SMOMobile` 目录。
-
-## 3. 复制游戏资源
-
-将当前项目已有的 `ExeFS` 和 `RomFS`，或 `RomFS.smoa.N` 分卷，复制到：
-
-```text
-文件 → 我的 iPhone → SMOMobile → SMO Resource/
-```
-
-推荐目录结构见 [resource_layout.md](resource_layout.md)。
-
-## 4. 覆盖安装
-
-后续更新只需要覆盖安装新的 IPA。只要侧载工具保留应用数据，Documents 中的游戏资源、存档和日志就不需要重新复制。
-
-## 5. 日志和诊断
-
-日志位于应用 Documents 目录。资源检查、宿主启动、NVN/Metal 和音频诊断会写入 `log.txt`；上一轮日志保存在 `log.prev.txt`。
-
-构建阶段会运行 `smo/verify/check_thin_ipa.py`，检查 IPA 中只有一个 App，并确认没有 `ExeFS`、`RomFS`、NSP/NCA 或原始游戏着色器资源。
-
-`build_report.json` 同时记录游戏 Build ID、ExeFS 模块哈希、RomFS 文件数，以及 App/Guest 的最低 iOS 版本一致性。
+手机日志位于 `Documents/log.txt` 和 `log.prev.txt`；存档位于 `save/`。
+`env.txt` 支持 nxnative 参数，例如 `DM_LANG=zh-Hans`。
+应用校验完成后固定资源路径，配置文件不会把游戏文件切到未校验目录。
+标题、进入关卡、触控/手柄、声音和长时间运行需用户侧载后分别验收。
+上游 1.4.1 包含 3 个不能由现有翻译链编译的几何着色器（雷电效果）；构建报告保留成功和失败数量，不将其计为全量着色器通过。

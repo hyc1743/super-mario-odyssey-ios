@@ -1,52 +1,36 @@
-# 外置游戏资源布局
+# nxnative 外置资源布局
 
-IPA 是薄壳，只包含 iOS 运行时、宿主、Metal/NVN 层和必要的 RuntimeShaders。游戏主体资源留在 App 的 Documents 目录中，覆盖安装时不需要重新复制。
-
-## 推荐布局
+在「文件 → 我的 iPhone → SMO Mobile」复制以下内容：
 
 ```text
 Documents/
-└── SMO Resource/
-    ├── ExeFS/
-    │   ├── main
-    │   ├── sdk
-    │   ├── subsdk0
-    │   ├── rtld
-    │   └── main.npdm
-    └── RomFS/
-        ├── ObjectData/
-        ├── StageData/
-        ├── ShaderData/
-        └── SoundData/
+├── romfs/
+│   ├── ObjectData/
+│   ├── StageData/
+│   ├── ShaderData/
+│   └── SoundData/SeResourceStd2nd.aras
+├── msl/
+│   └── b-<shader_chain>/
+│       ├── <key>_b.metallib
+│       └── <key>_b.json
+├── resource_manifest.json
+├── save/                       # 自动创建，更新资源不覆盖
+├── temp/                       # 自动创建
+├── env.txt                     # 可选
+├── log.txt
+└── log.prev.txt
 ```
 
-也支持首次复制时使用分卷格式：
+`romfs` 是本体和 1.4.1 升级档经 LibHac 合并后的目录，不是升级档单独解出的目录。
+用户不需要向手机复制 ExeFS，游戏程序已进入公共仓库 Actions 构建的个人 IPA 并随应用签名；个人 IPA 仅存放于私有仓库。
+编译后着色器及反射文件随资源包提供，不包含在个人 IPA 中。
+旧版 `SMO Resource/ExeFS`、`RomFS.smoa.N` 不作为新 nxnative 路径的输入；请用新工具重新生成资源包。
 
-```text
-Documents/SMO Resource/RomFS/
-├── RomFS.smoa.0
-├── RomFS.smoa.1
-└── ...
-```
+清单记录格式版本、Title ID、显示版本、nxnative 提交、各模块 Build ID、着色器链，
+以及每个资源的相对路径、字节数和 SHA-256。个人 IPA 内的身份信息绑定资源清单哈希。
+启动前核对身份和全部文件；校验缓存存放在应用 Caches，修改文件后重新核对。
+复制错误、版本混用和损坏文件显示可修复的路径说明。
 
-应用首次启动会检查分卷并展开到 `RomFS/`。分卷编号必须从 `0` 连续递增。
-
-## 检查命令
-
-```bash
-python3 smo/tools/build_ipa.py \
-  --resources "<SMO Resource 或其父目录>" \
-  --output out/ipa
-```
-
-命令只读检查资源，生成 `out/ipa/build_report.json`，不会修改或复制游戏资源。
-
-## IPA 内容约束
-
-IPA 中不应出现以下内容：
-
-- `.nsp`、`.nca`、`.tik`；
-- `ExeFS/`、`RomFS/`；
-- `.szs`、`.sharc`、`.sharcb`、`.bfsha` 等游戏原始资源。
-
-必要的运行时着色器归档位于应用内 `RuntimeShaders/`，它只包含经过验证的运行时 shader 资源。
+资源分发采用不超过 1 GiB 的 ZIP 连续分片，文件名为
+`SMO-Resources-1.4.1.zip.part000` 起连续编号。使用同 release 的 `resources-parts.json`
+与还原脚本恢复目录后再复制到手机，不能直接将分片作为 RomFS 使用。

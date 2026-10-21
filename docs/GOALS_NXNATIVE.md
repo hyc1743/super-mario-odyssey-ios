@@ -1,5 +1,7 @@
 # nxnative 技术路径迁移目标草案
 
+> 2026-10-19：本文保留旧运行时的历史目标和进度。当前已批准的交付边界为纯壳完全不含游戏内容、个人 IPA 包含游戏程序、RomFS 与编译后着色器外置，使用本体叠加 1.4.1 升级档。以 [README_INSTALL.md](README_INSTALL.md) 和 [resource_layout.md](resource_layout.md) 为准。
+
 本文定义当前项目参考 `nxnative` 技术路径后的交付目标。游戏资源继续复用当前项目已有的 ExeFS、RomFS、RomFS 分卷和相关运行时资源，IPA 只包含运行时和必要的应用资源，以控制包体积。
 
 ## 总目标

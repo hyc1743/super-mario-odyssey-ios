@@ -157,5 +157,5 @@ echo "== 产物 =="
 ls -la "$OUT"
 echo "== 检查：壳里不许有任何游戏内容 =="
 # 与参考项目 shell_build.sh 末尾同样的自我检查：壳只该有自己的代码、图标与几张小表。
-"$PY" "$ROOT/smo/verify/check_thin_ipa.py" "$OUT/SMOMobile-shell.ipa" --json "$OUT/thin_ipa_report.json"
+"$PY" "$ROOT/smo/verify/check_thin_ipa.py" "$OUT/SMOMobile-shell.ipa" --policy legacy --json "$OUT/thin_ipa_report.json"
 echo "thin IPA check passed"

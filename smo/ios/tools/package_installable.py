@@ -51,7 +51,7 @@ def main(argv=None) -> int:
     inject(args.shell_ipa, framework, args.output)
     sys.path.insert(0, str(ROOT / "smo" / "verify"))
     from check_thin_ipa import inspect
-    report = inspect(args.output)
+    report = inspect(args.output, policy="legacy")
     (args.output.parent / "thin_ipa_report.json").write_text(
         json.dumps(report, indent=2) + "\n", encoding="utf-8")
     if not report["thin"]:
